@@ -82,7 +82,7 @@ void setup() {
 }
 
 // Define static members of Oscillator
-float Oscillator::sineTable[SINE_TABLE_SIZE];
+int16_t Oscillator::sineTable[SINE_TABLE_SIZE];
 bool Oscillator::tableInitialized = false;
 
 // Variables to store previous knob values for change detection

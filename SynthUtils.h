@@ -67,21 +67,21 @@ inline bool knobMoved(int current, int previous, int threshold = 50) {
 }
 
 /**
- * @brief Simple software oscillator using lookup table for performance
+ * @brief Simple software oscillator using lookup table and fixed-point math (float-free ISR)
  */
 class Oscillator {
 public:
-  static float sineTable[SINE_TABLE_SIZE];
+  static int16_t sineTable[SINE_TABLE_SIZE];
   static bool tableInitialized;
 
+  uint32_t phase;
+  uint32_t phaseIncrement;
   float frequency;
-  float phase;
-  float phaseIncrement;
 
-  Oscillator() : frequency(0), phase(0), phaseIncrement(0) {
+  Oscillator() : phase(0), phaseIncrement(0), frequency(0) {
     if (!tableInitialized) {
       for (int i = 0; i < SINE_TABLE_SIZE; i++) {
-        sineTable[i] = sin((2.0f * PI * i) / SINE_TABLE_SIZE);
+        sineTable[i] = (int16_t)(sin((2.0f * PI * i) / SINE_TABLE_SIZE) * 32767.0f);
       }
       tableInitialized = true;
     }
@@ -89,16 +89,20 @@ public:
 
   void setFrequency(float freq) {
     frequency = freq;
-    phaseIncrement = (freq * SINE_TABLE_SIZE) / SAMPLE_RATE;
+    if (freq <= 0) {
+      phaseIncrement = 0;
+    } else {
+      // phaseIncrement = (freq / SAMPLE_RATE) * 2^32
+      phaseIncrement = (uint32_t)((double)freq * 4294967296.0 / (double)SAMPLE_RATE);
+    }
   }
 
-  float nextSample() {
-    if (frequency <= 0) return 0;
-    // Simple linear interpolation could be added here,
-    // but for now, we'll use a direct index for speed in ISR.
-    float sample = sineTable[(int)phase];
+  // Returns sample in range -32767 to 32767 (float-free)
+  int16_t nextSample() {
+    if (phaseIncrement == 0) return 0;
+    // Map 32-bit phase to SINE_TABLE_SIZE (1024 = 10 bits)
+    int16_t sample = sineTable[phase >> 22];
     phase += phaseIncrement;
-    while (phase >= SINE_TABLE_SIZE) phase -= SINE_TABLE_SIZE;
     return sample;
   }
 };

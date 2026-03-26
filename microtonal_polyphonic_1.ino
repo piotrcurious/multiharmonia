@@ -32,10 +32,10 @@ float notes[MAX_NOTES];
 char keys[MAX_NOTES];
 
 // Create an array to store whether a channel is active
-bool active[MAX_NOTES];
+volatile bool active[MAX_NOTES];
 
 // Define static members of Oscillator
-float Oscillator::sineTable[SINE_TABLE_SIZE];
+int16_t Oscillator::sineTable[SINE_TABLE_SIZE];
 bool Oscillator::tableInitialized = false;
 
 // Software oscillators for each voice
@@ -160,25 +160,27 @@ void remove_note(char key) {
 hw_timer_t * timer = NULL;
 portMUX_TYPE timerMux = portMUX_INITIALIZER_UNLOCKED;
 
-// Timer interrupt for audio generation
+// Timer interrupt for audio generation (Float-Free)
 void IRAM_ATTR onTimer() {
-  float mix = 0;
+  int32_t mix = 0;
   int activeVoices = 0;
 
   for (int i = 0; i < MAX_NOTES; i++) {
-    if (oscillators[i].frequency > 0) {
+    // Rely on phaseIncrement being atomic-ish (32-bit) or just check active flag
+    if (active[i]) {
       mix += oscillators[i].nextSample();
       activeVoices++;
     }
   }
 
-  if (activeVoices > 0) {
-    mix /= activeVoices; // Normalize
+  if (activeVoices > 1) {
+    mix /= activeVoices;
   }
 
   // Output to DAC (GPIO 25)
-  // Scale -1.0..1.0 to 0..255
-  int val = (int)((mix + 1.0f) * 127.5f);
+  // mix is -32767 to 32767.
+  // Map to 0..255: (mix + 32768) >> 8
+  uint8_t val = (uint8_t)((mix + 32768) >> 8);
   dacWrite(25, val);
 }
 
