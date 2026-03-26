@@ -36,6 +36,19 @@ unsigned long micros();
 void ledcSetup(uint8_t channel, double freq, uint8_t resolution_bits);
 void ledcAttachPin(uint8_t pin, uint8_t channel);
 void ledcWriteTone(uint8_t channel, double freq);
+void dacWrite(uint8_t pin, uint8_t value);
+
+#define PI 3.1415926535897932384626433832795
+#define IRAM_ATTR
+
+typedef struct hw_timer_reg_s hw_timer_t;
+typedef uint32_t portMUX_TYPE;
+#define portMUX_INITIALIZER_UNLOCKED 0
+
+hw_timer_t * timerBegin(uint8_t num, uint16_t divider, bool countUp);
+void timerAttachInterrupt(hw_timer_t *timer, void (*fn)(void), bool edge);
+void timerAlarmWrite(hw_timer_t *timer, uint64_t interruptAt, bool autoreload);
+void timerAlarmEnable(hw_timer_t *timer);
 #ifdef __cplusplus
 }
 #endif

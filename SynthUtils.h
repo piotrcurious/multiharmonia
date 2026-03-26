@@ -2,6 +2,9 @@
 #define SYNTHUTILS_H
 
 #include <Arduino.h>
+#include <functional>
+
+#define SAMPLE_RATE 20000.0f
 
 // Special key codes for events
 #define KEY_EVENT_PRESS   0x8000
@@ -61,6 +64,54 @@ inline int readKnobInt(int pin, int min_val, int max_val) {
 inline bool knobMoved(int current, int previous, int threshold = 50) {
   return abs(current - previous) >= threshold;
 }
+
+/**
+ * @brief Simple software oscillator
+ */
+class Oscillator {
+public:
+  float frequency;
+  float phase;
+  float phaseIncrement;
+
+  Oscillator() : frequency(0), phase(0), phaseIncrement(0) {}
+
+  void setFrequency(float freq) {
+    frequency = freq;
+    phaseIncrement = (freq * 2.0f * PI) / SAMPLE_RATE;
+  }
+
+  float nextSample() {
+    if (frequency <= 0) return 0;
+    float sample = sin(phase);
+    phase += phaseIncrement;
+    if (phase >= 2.0f * PI) phase -= 2.0f * PI;
+    return sample;
+  }
+};
+
+/**
+ * @brief Simple monophonic voice management
+ */
+class MonoVoice {
+public:
+  char activeKey;
+  Oscillator oscillator;
+
+  MonoVoice() : activeKey('\0') {}
+
+  void update(PS2Keyboard &kb, std::function<float(char)> calcFreq) {
+    if (kb.available()) {
+      activeKey = kb.read();
+      oscillator.setFrequency(calcFreq(activeKey));
+    }
+
+    if (activeKey != '\0' && kb.readKeyState(activeKey) == 0) {
+      oscillator.setFrequency(0);
+      activeKey = '\0';
+    }
+  }
+};
 
 /**
  * @brief A simple class to track keyboard state if the library doesn't.

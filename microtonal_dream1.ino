@@ -94,12 +94,39 @@ void setup() {
   ledcAttachPin(25, 0);
 }
 
+// Variables to store previous knob values for change detection
+int prevKnob1 = -1, prevKnob2 = -1, prevKnob3 = -1, prevKnob4 = -1, prevKnob5 = -1, prevKnob8 = -1;
+#define KNOB_THRESHOLD 50
+
 // Current active key in monophonic mode
 char activeKey = '\0';
 
 void loop() {
-  // Generate a scale based on the knob values
-  generateScale();
+  // Check if knobs moved significantly
+  int k1 = analogRead(KNOB1_PIN);
+  int k2 = analogRead(KNOB2_PIN);
+  int k3 = analogRead(KNOB3_PIN);
+  int k4 = analogRead(KNOB4_PIN);
+  int k5 = analogRead(KNOB5_PIN);
+  int k8 = analogRead(KNOB8_PIN);
+
+  if (knobMoved(k1, prevKnob1, KNOB_THRESHOLD) ||
+      knobMoved(k2, prevKnob2, KNOB_THRESHOLD) ||
+      knobMoved(k3, prevKnob3, KNOB_THRESHOLD) ||
+      knobMoved(k4, prevKnob4, KNOB_THRESHOLD) ||
+      knobMoved(k5, prevKnob5, KNOB_THRESHOLD) ||
+      knobMoved(k8, prevKnob8, KNOB_THRESHOLD)) {
+
+    // Generate a scale based on the knob values
+    generateScale();
+
+    prevKnob1 = k1;
+    prevKnob2 = k2;
+    prevKnob3 = k3;
+    prevKnob4 = k4;
+    prevKnob5 = k5;
+    prevKnob8 = k8;
+  }
   
   // Check if a key is available
   if (keyboard.available()) {

@@ -25,7 +25,15 @@ void ledcWriteTone(uint8_t channel, double freq) {
         printf("Tone set on channel %d: %f Hz\n", channel, freq);
     }
 }
+void dacWrite(uint8_t pin, uint8_t value) {
+    // printf("DAC set on pin %d: %d\n", pin, value);
 }
+}
+
+hw_timer_t * timerBegin(uint8_t num, uint16_t divider, bool countUp) { return NULL; }
+void timerAttachInterrupt(hw_timer_t *timer, void (*fn)(void), bool edge) {}
+void timerAlarmWrite(hw_timer_t *timer, uint64_t interruptAt, bool autoreload) {}
+void timerAlarmEnable(hw_timer_t *timer) {}
 void arduino_randomSeed(unsigned long seed) { std::srand(seed); }
 long arduino_random(long howbig) { return (howbig > 0) ? std::rand() % howbig : 0; }
 long arduino_random(long howsmall, long howbig) {

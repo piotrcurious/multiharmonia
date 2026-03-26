@@ -34,6 +34,8 @@ char keys[MAX_NOTES];
 // Create an array to store whether a channel is active
 bool active[MAX_NOTES];
 
+// Software oscillators for each voice
+Oscillator oscillators[MAX_NOTES];
 
 // Helper to find key index in a row
 int find_key_in_row(char key, const char* row) {
@@ -107,16 +109,14 @@ float calculate_frequency(char key) {
   return freq;
 }
 
-// Create a function to play a note on a given channel with a given frequency
+// Create a function to play a note
 void play_note(int channel, float freq) {
-  // Set the frequency of the channel using the ledcWriteTone function
-  ledcWriteTone(channel, freq);
+  oscillators[channel].setFrequency(freq);
 }
 
-// Create a function to stop playing a note on a given channel
+// Create a function to stop playing a note
 void stop_note(int channel) {
-  // Set the frequency of the channel to zero using the ledcWriteTone function
-  ledcWriteTone(channel, 0);
+  oscillators[channel].setFrequency(0);
 }
 
 // Create a function to add a note
@@ -153,23 +153,47 @@ void remove_note(char key) {
   }
 }
 
+hw_timer_t * timer = NULL;
+portMUX_TYPE timerMux = portMUX_INITIALIZER_UNLOCKED;
+
+// Timer interrupt for audio generation
+void IRAM_ATTR onTimer() {
+  float mix = 0;
+  int activeVoices = 0;
+
+  for (int i = 0; i < MAX_NOTES; i++) {
+    if (oscillators[i].frequency > 0) {
+      mix += oscillators[i].nextSample();
+      activeVoices++;
+    }
+  }
+
+  if (activeVoices > 0) {
+    mix /= activeVoices; // Normalize
+  }
+
+  // Output to DAC (GPIO 25)
+  // Scale -1.0..1.0 to 0..255
+  int val = (int)((mix + 1.0f) * 127.5f);
+  dacWrite(25, val);
+}
+
 // Create a setup function to initialize the esp32 and the keyboard
 void setup() {
   // Initialize serial communication for debugging purposes
   Serial.begin(115200);
-  Serial.println("Microtonal Polyphonic Synthesizer Starting...");
-
-  // Define pins for polyphonic output (one per voice)
-  const int outputPins[MAX_NOTES] = {25, 26, 27, 14, 12, 13, 15, 2};
-
-  // Initialize each ledc channel with a resolution of 8 bits and a frequency of 0 Hz
-  for (int i = 0; i < MAX_NOTES; i++) {
-    ledcSetup(i, 5000, 8);
-    ledcAttachPin(outputPins[i], i);
-  }
+  Serial.println("Microtonal Polyphonic Synthesizer Starting (Software Mixed)...");
 
   // Initialize the keyboard with the data and clock pins
   keyboard.begin(DATA, CLOCK);
+
+  // Set up Timer for audio (SAMPLE_RATE)
+  // Timer 0, divider 80 (1us per tick if 80MHz)
+  timer = timerBegin(0, 80, true);
+  timerAttachInterrupt(timer, &onTimer, true);
+  // Alarm every (1,000,000 / SAMPLE_RATE) us
+  timerAlarmWrite(timer, 1000000 / (int)SAMPLE_RATE, true);
+  timerAlarmEnable(timer);
 }
 
 // Note tracker to handle state
