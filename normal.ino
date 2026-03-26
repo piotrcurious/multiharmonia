@@ -46,6 +46,10 @@ int mapValue(int value, int fromLow, int fromHigh, int toLow, int toHigh) {
   return (value - fromLow) * (toHigh - toLow) / (fromHigh - fromLow) + toLow;
 }
 
+// Variables to store previous knob values for change detection
+int prevKnob1 = -1, prevKnob2 = -1, prevKnob3 = -1, prevKnob4 = -1;
+#define KNOB_THRESHOLD 50
+
 // A function to read the analog knobs and update the scale and note parameters
 void readKnobs() {
   // Read the knob values
@@ -53,6 +57,19 @@ void readKnobs() {
   knob2Value = analogRead(KNOB2_PIN);
   knob3Value = analogRead(KNOB3_PIN);
   knob4Value = analogRead(KNOB4_PIN);
+
+  // Only regenerate scale if knobs have moved significantly
+  if (abs(knob1Value - prevKnob1) < KNOB_THRESHOLD &&
+      abs(knob2Value - prevKnob2) < KNOB_THRESHOLD &&
+      abs(knob3Value - prevKnob3) < KNOB_THRESHOLD &&
+      abs(knob4Value - prevKnob4) < KNOB_THRESHOLD) {
+    return;
+  }
+
+  prevKnob1 = knob1Value;
+  prevKnob2 = knob2Value;
+  prevKnob3 = knob3Value;
+  prevKnob4 = knob4Value;
 
   // Map the knob values to the scale and note parameters
   baseNote = mapValue(knob1Value, 0, 4095, 0, MAX_NOTE); // Map knob 1 to the base note (0-127)

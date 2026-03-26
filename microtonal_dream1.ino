@@ -45,15 +45,16 @@ void generateScale() {
   // Read the knob values and constrain them to reasonable ranges
   baseGranularity = constrain(readKnob(KNOB1_PIN, 1, 100), 1, 100); // From 1 cent to 100 cents
   baseKey = constrain(readKnob(KNOB2_PIN, -1200, 1200), -1200, 1200); // From -12 semitones to +12 semitones
+
+  // Quantize baseKey by baseGranularity
+  baseKey = (baseKey / baseGranularity) * baseGranularity;
+
   consonantIntervals = constrain(readKnob(KNOB3_PIN, 100, 1200), 100, 1200); // From 1 semitone to 12 semitones
   dissonantIntervals = constrain(readKnob(KNOB4_PIN, -1200, -100), -1200, -100); // From -12 semitones to -1 semitone
   dissonantOffset = constrain(readKnob(KNOB5_PIN, -600, 600), -600, 600); // From -6 semitones to +6 semitones
 
-  // Calculate the number of notes in the scale based on the base granularity
-  int numNotes = MAX_NOTES / baseGranularity;
-
   // Loop through the notes and calculate their frequencies based on the intervals and offset
-  for (int i = 0; i < numNotes; i++) {
+  for (int i = 0; i < MAX_NOTES; i++) {
     int interval; // The interval in cents from the base key
     if (i % 2 == 0) { // If it is an even note, use the consonant intervals
       interval = baseKey + (i / 2) * consonantIntervals;
@@ -72,7 +73,8 @@ void generateScale() {
 // A function to play a note based on a key press
 void playNote(char key) {
    // Map the key to a note index using the ASCII code
-   int noteIndex = key - 32; // Subtract 32 to start from the space key
+   // Map the key to a note index using the ASCII code
+   int noteIndex = (unsigned char)key - 32;
    // Constrain the note index to the valid range
    noteIndex = constrain(noteIndex, 0, MAX_NOTES - 1);
    // Get the frequency of the note from the notes array

@@ -51,6 +51,8 @@ T constrain(T x, L a, H b) {
 }
 using std::sqrt;
 using std::round;
+#include <cstring>
+using std::strchr;
 class Serial_ {
 public:
     void begin(unsigned long baud) {}
