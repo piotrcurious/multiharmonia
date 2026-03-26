@@ -2,6 +2,7 @@
 // Include the libraries for PS2 keyboard and ESP32 DAC
 #include <PS2Keyboard.h>
 #include <driver/dac.h>
+#include "SynthUtils.h"
 
 // Define the pins for the keyboard and the knobs
 #define DATA_PIN 16
@@ -41,11 +42,6 @@ bool keyPressed; // Whether a key is pressed or not
 int note; // The current note to play
 int noteFreq; // The frequency of the current note in Hz
 
-// A function to map a value from one range to another
-int mapValue(int value, int fromLow, int fromHigh, int toLow, int toHigh) {
-  return (value - fromLow) * (toHigh - toLow) / (fromHigh - fromLow) + toLow;
-}
-
 // Variables to store previous knob values for change detection
 int prevKnob1 = -1, prevKnob2 = -1, prevKnob3 = -1, prevKnob4 = -1;
 #define KNOB_THRESHOLD 50
@@ -59,10 +55,10 @@ void readKnobs() {
   knob4Value = analogRead(KNOB4_PIN);
 
   // Only regenerate scale if knobs have moved significantly
-  if (abs(knob1Value - prevKnob1) < KNOB_THRESHOLD &&
-      abs(knob2Value - prevKnob2) < KNOB_THRESHOLD &&
-      abs(knob3Value - prevKnob3) < KNOB_THRESHOLD &&
-      abs(knob4Value - prevKnob4) < KNOB_THRESHOLD) {
+  if (!knobMoved(knob1Value, prevKnob1, KNOB_THRESHOLD) &&
+      !knobMoved(knob2Value, prevKnob2, KNOB_THRESHOLD) &&
+      !knobMoved(knob3Value, prevKnob3, KNOB_THRESHOLD) &&
+      !knobMoved(knob4Value, prevKnob4, KNOB_THRESHOLD)) {
     return;
   }
 
@@ -205,8 +201,8 @@ void readKeyboard() {
         note = MAX_NOTE;
       }
 
-      // Calculate the frequency of the note using the formula f = 440 * 2^((n-69)/12)
-      noteFreq = A4_FREQ * pow(2, (note - A4_NOTE) / 12.0);
+      // Calculate the frequency
+      noteFreq = (int)freqFromCents(A4_FREQ, (note - A4_NOTE) * 100.0f);
     }
   } else {
     // If no key is available, set the key pressed flag to false

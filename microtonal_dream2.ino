@@ -1,6 +1,7 @@
 // Include the libraries for esp32 and ps2 keyboard
 #include <Arduino.h>
 #include <PS2Keyboard.h>
+#include "SynthUtils.h"
 
 // Define the pins for the analog knobs and the keyboard data and clock
 #define KNOB1 A0 // Base granularity of scale
@@ -30,16 +31,6 @@ const char ADDITIONAL_KEYS[KEYS_PER_ROW] = {'Z', 'X', 'C', 'V', 'B', 'N', 'M', '
 // Define a variable to store the current pressed key and its frequency
 char current_key = '\0'; // Current pressed key
 float current_freq = 0;  // Current frequency
-
-// Define a function to map a value from one range to another
-float mapf(float x, float in_min, float in_max, float out_min, float out_max) {
-  return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
-}
-
-// Define a function to quantize a frequency to a given granularity
-float quantize(float freq, float granularity) {
-  return round(freq / granularity) * granularity;
-}
 
 // Define a function to calculate the frequency of a note based on its index and offset from the base frequency and the scale interval
 float calculate_frequency(int index, float offset, float base_freq, float scale_interval) {
@@ -74,25 +65,25 @@ void loop() {
   // Read the values from the analog knobs and map them to their corresponding ranges
   
   // Base granularity of scale: from MIN_FREQ to MAX_FREQ in Hz
-  float knob1 = mapf(analogRead(KNOB1), 0, 4095, MIN_FREQ, MAX_FREQ);
+  float knob1 = readKnobFloat(KNOB1, MIN_FREQ, MAX_FREQ);
   
   // Base key of the scale quantified to selected granularity: from MIN_FREQ to MAX_FREQ in Hz, quantized by knob1 value
-  float knob2 = quantize(mapf(analogRead(KNOB2), 0, 4095, MIN_FREQ, MAX_FREQ), knob1);
+  float knob2 = quantize(readKnobFloat(KNOB2, MIN_FREQ, MAX_FREQ), knob1);
   
   // Intervals of the consonant key row: from 1.01 to 2.00 (multiplicative factor)
-  float knob3 = mapf(analogRead(KNOB3), 0, 4095, 1.01, 2.00);
+  float knob3 = readKnobFloat(KNOB3, 1.01, 2.00);
   
   // Intervals of the dissonant key row: from 1.01 to 2.00 (multiplicative factor)
-  float knob4 = mapf(analogRead(KNOB4), 0, 4095, 1.01, 2.00);
+  float knob4 = readKnobFloat(KNOB4, 1.01, 2.00);
   
   // Offset of the dissonant key row: from -5 to 5 (additive factor)
-  float knob5 = mapf(analogRead(KNOB5), 0, 4095, -5, 5);
+  float knob5 = readKnobFloat(KNOB5, -5, 5);
   
   // Offset of the additional consonant row: from -5 to 5 (additive factor)
-  float knob6 = mapf(analogRead(KNOB6), 0, 4095, -5, 5);
+  float knob6 = readKnobFloat(KNOB6, -5, 5);
   
   // Interval of additional consonant row: from 1.01 to 2.00 (multiplicative factor)
-  float knob7 = mapf(analogRead(KNOB7), 0, 4095, 1.01, 2.00);
+  float knob7 = readKnobFloat(KNOB7, 1.01, 2.00);
   
   // Print the values of the knobs to the serial monitor for debugging
   Serial.print("Knob1: "); Serial.println(knob1);

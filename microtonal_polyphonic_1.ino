@@ -1,6 +1,7 @@
 // Include the libraries for esp32 and ps2 keyboard
 #include <Arduino.h>
 #include <PS2Keyboard.h>
+#include "SynthUtils.h"
 
 // Define the pins for the analog knobs and the keyboard data and clock
 #define KNOB1 A0 // Base granularity of scale
@@ -10,6 +11,7 @@
 #define KNOB5 A4 // Offset of the dissonant key row
 #define KNOB6 A5 // Offset of the additional consonant row
 #define KNOB7 A6 // Interval of additional consonant row
+#define KNOB8 33 // Vector Row shift/transpose (cents)
 #define DATA 16  // Keyboard data pin
 #define CLOCK 17 // Keyboard clock pin
 
@@ -32,16 +34,6 @@ char keys[MAX_NOTES];
 // Create an array to store whether a channel is active
 bool active[MAX_NOTES];
 
-// Create a function to map a value from one range to another
-float mapf(float x, float in_min, float in_max, float out_min, float out_max) {
-  return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
-}
-
-// Create a function to read an analog knob value and map it to a desired range
-float read_knob(int pin, float min, float max) {
-  int raw = analogRead(pin); // Read the raw value from 0 to 4095
-  return mapf(raw, 0, 4095, min, max); // Map it to the desired range
-}
 
 // Helper to find key index in a row
 int find_key_in_row(char key, const char* row) {
@@ -53,13 +45,13 @@ int find_key_in_row(char key, const char* row) {
 // Create a function to calculate the frequency of a note based on the knob values and the keyboard key
 float calculate_frequency(char key) {
   // Read the knob values and constrain them to reasonable ranges
-  float knob1 = constrain(read_knob(KNOB1, 1, 100), 1, 100); // Base granularity of scale in cents (1/100 of a semitone)
-  float knob2 = constrain(read_knob(KNOB2, 0, knob1), 0, knob1); // Base key of the scale quantified to selected granularity in cents
-  float knob3 = constrain(read_knob(KNOB3, knob1, knob1 * 12), knob1, knob1 * 12); // Intervals of the consonant key row in cents
-  float knob4 = constrain(read_knob(KNOB4, knob1, knob1 * 12), knob1, knob1 * 12); // Intervals of the dissonant key row in cents
-  float knob5 = constrain(read_knob(KNOB5, -knob4 / 2, knob4 / 2), -knob4 / 2, knob4 / 2); // Offset of the dissonant key row in cents
-  float knob6 = constrain(read_knob(KNOB6, -knob3 / 2, knob3 / 2), -knob3 / 2, knob3 / 2); // Offset of the additional consonant row in cents
-  float knob7 = constrain(read_knob(KNOB7, knob1, knob1 * 12), knob1, knob1 * 12); // Interval of additional consonant row in cents
+  float knob1 = constrain(readKnobFloat(KNOB1, 1, 100), 1.0f, 100.0f); // Base granularity of scale in cents (1/100 of a semitone)
+  float knob2 = constrain(readKnobFloat(KNOB2, 0, knob1), 0.0f, knob1); // Base key of the scale quantified to selected granularity in cents
+  float knob3 = constrain(readKnobFloat(KNOB3, knob1, knob1 * 12), knob1, knob1 * 12); // Intervals of the consonant key row in cents
+  float knob4 = constrain(readKnobFloat(KNOB4, knob1, knob1 * 12), knob1, knob1 * 12); // Intervals of the dissonant key row in cents
+  float knob5 = constrain(readKnobFloat(KNOB5, -knob4 / 2, knob4 / 2), -knob4 / 2, knob4 / 2); // Offset of the dissonant key row in cents
+  float knob6 = constrain(readKnobFloat(KNOB6, -knob3 / 2, knob3 / 2), -knob3 / 2, knob3 / 2); // Offset of the additional consonant row in cents
+  float knob7 = constrain(readKnobFloat(KNOB7, knob1, knob1 * 12), knob1, knob1 * 12); // Interval of additional consonant row in cents
 
   // Define the base frequency as A4 (440 Hz)
   float base_freq = 440;
@@ -84,14 +76,17 @@ float calculate_frequency(char key) {
     row_offset = knob6;
   }
 
+  // Read vector shift knob
+  float vector_shift = readKnobFloat(KNOB8, -1200, 1200);
+
   // Calculate the offset from the base key in cents based on the keyboard key and the knobs
-  float offset = key_pos * (knob3 + knob4) + row_offset;
+  float offset = key_pos * (knob3 + knob4) + row_offset + vector_shift;
 
   // Add the base key and base frequency offsets to the offset
   offset += (knob2 - knob1 / 2);
 
-  // Calculate the frequency by multiplying the base frequency by two raised to the power of offset divided by twelve hundred
-  float freq = base_freq * pow(2, offset / 1200);
+  // Calculate the frequency
+  float freq = freqFromCents(base_freq, offset);
 
   // Return the frequency
   return freq;
