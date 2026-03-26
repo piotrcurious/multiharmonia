@@ -82,7 +82,7 @@ void readKnobs() {
 
     // Generate the dissonant row intervals using the consonant size and a random offset
   int dissonantSize = MAX_SCALE - consonantSize; // The dissonant row size is the complement of the consonant row size
-  int dissonantOffset = random(0, MAX_SCALE); // Pick a random offset for the dissonant row
+  dissonantOffset = random(0, MAX_SCALE); // Pick a random offset for the dissonant row
   for (int i = 0; i < MAX_SCALE; i++) {
     if (i < dissonantSize) {
       dissonantRow[i] = scale[(i + dissonantOffset) % MAX_SCALE]; // Use modular arithmetic to wrap around the scale

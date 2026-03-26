@@ -169,4 +169,5 @@ void loop() {
     }
     
     delay(10); // Add a small delay to avoid bouncing keys
+  }
 }

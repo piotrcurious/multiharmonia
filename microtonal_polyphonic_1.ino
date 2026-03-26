@@ -61,7 +61,7 @@ float calculate_frequency(char key) {
   char base_key = 'Q';
 
   // Calculate the offset from the base key in cents based on the keyboard key and the knobs
-  float offset = (key - base_key) * (knob3 + knob4) + (key >= 'A' ? knob5 : (key >= 'Z' ? knob6 : 0));
+  float offset = (key - base_key) * (knob3 + knob4) + (((key >= 'A' && key <= 'L') || key == ';' || key == '\'') ? knob5 : (((key >= 'Z' && key <= 'Z') || (key >= 'X' && key <= 'M') || key == ',' || key == '.' || key == '/') ? knob6 : 0));
 
   // Add the base key and base frequency offsets to the offset
   offset += (knob2 - knob1 / 2);
@@ -162,11 +162,11 @@ void loop() {
     char key = keyboard.read();
 
     // Check if the key is one of the valid keys for playing notes
-    if (key >= 'Q' && key <= 'P') { // Consonant key row
+    if ((key >= 'Q' && key <= 'P') || key == '[' || key == ']') { // Consonant key row
       add_note(key); // Add the note to the array and play it
-    } else if (key >= 'A' && key <= 'L') { // Dissonant key row
+    } else if ((key >= 'A' && key <= 'L') || key == ';' || key == '\'') { // Dissonant key row
       add_note(key); // Add the note to the array and play it
-    } else if (key >= 'Z' && key <= 'M') { // Additional consonant row
+    } else if ((key >= 'Z' && key <= 'Z') || (key >= 'X' && key <= 'M') || key == ',' || key == '.' || key == '/') { // Additional consonant row
       add_note(key); // Add the note to the array and play it
     } else if (key == PS2_DELETE) { // Delete key
       for (int i = 0; i < note_count; i++) {
