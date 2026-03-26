@@ -101,7 +101,8 @@ public:
   int16_t nextSample() {
     if (phaseIncrement == 0) return 0;
     // Map 32-bit phase to SINE_TABLE_SIZE (1024 = 10 bits)
-    int16_t sample = sineTable[phase >> 22];
+    // Safety mask for the index
+    int16_t sample = sineTable[(phase >> 22) & (SINE_TABLE_SIZE - 1)];
     phase += phaseIncrement;
     return sample;
   }
@@ -127,32 +128,6 @@ public:
       oscillator.setFrequency(0);
       activeKey = '\0';
     }
-  }
-};
-
-/**
- * @brief A simple class to track keyboard state if the library doesn't.
- */
-class NoteTracker {
-public:
-  bool states[256];
-  NoteTracker() {
-    for (int i = 0; i < 256; i++) states[i] = false;
-  }
-
-  void processEvent(uint16_t event) {
-    uint8_t code = event & 0xFF;
-    if (event & KEY_EVENT_PRESS) states[code] = true;
-    else if (event & KEY_EVENT_RELEASE) states[code] = false;
-  }
-
-  bool isPressed(uint8_t code) {
-    return states[code];
-  }
-
-  bool anyPressed() {
-    for (int i = 0; i < 256; i++) if (states[i]) return true;
-    return false;
   }
 };
 

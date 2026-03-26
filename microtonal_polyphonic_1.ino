@@ -15,6 +15,9 @@
 #define DATA 16  // Keyboard data pin
 #define CLOCK 17 // Keyboard clock pin
 
+hw_timer_t * timer = NULL;
+portMUX_TYPE timerMux = portMUX_INITIALIZER_UNLOCKED;
+
 // Define the maximum number of notes that can be played simultaneously
 #define MAX_NOTES 8
 
@@ -125,6 +128,7 @@ void stop_note(int channel) {
 
 // Create a function to add a note
 void add_note(char key) {
+  portENTER_CRITICAL(&timerMux);
   // Check if the note is already being played
   for (int i = 0; i < MAX_NOTES; i++) {
     if (active[i] && keys[i] == key) {
@@ -140,28 +144,31 @@ void add_note(char key) {
       keys[i] = key;
       active[i] = true;
       play_note(i, freq);
+      portEXIT_CRITICAL(&timerMux);
       return;
     }
   }
+  portEXIT_CRITICAL(&timerMux);
 }
 
 // Create a function to remove a note
 void remove_note(char key) {
+  portENTER_CRITICAL(&timerMux);
   for (int i = 0; i < MAX_NOTES; i++) {
     if (active[i] && keys[i] == key) {
       stop_note(i);
       active[i] = false;
       keys[i] = '\0';
+      portEXIT_CRITICAL(&timerMux);
       return;
     }
   }
+  portEXIT_CRITICAL(&timerMux);
 }
-
-hw_timer_t * timer = NULL;
-portMUX_TYPE timerMux = portMUX_INITIALIZER_UNLOCKED;
 
 // Timer interrupt for audio generation (Float-Free)
 void IRAM_ATTR onTimer() {
+  portENTER_CRITICAL_ISR(&timerMux);
   int32_t mix = 0;
   int activeVoices = 0;
 
@@ -182,6 +189,7 @@ void IRAM_ATTR onTimer() {
   // Map to 0..255: (mix + 32768) >> 8
   uint8_t val = (uint8_t)((mix + 32768) >> 8);
   dacWrite(25, val);
+  portEXIT_CRITICAL_ISR(&timerMux);
 }
 
 // Create a setup function to initialize the esp32 and the keyboard
@@ -201,9 +209,6 @@ void setup() {
   timerAlarmWrite(timer, 1000000 / (int)SAMPLE_RATE, true);
   timerAlarmEnable(timer);
 }
-
-// Note tracker to handle state
-NoteTracker tracker;
 
 // Variables to store previous knob values for change detection
 int prevKnob1 = -1, prevKnob2 = -1, prevKnob3 = -1, prevKnob4 = -1, prevKnob5 = -1, prevKnob6 = -1, prevKnob7 = -1, prevKnob8 = -1;
@@ -231,11 +236,13 @@ void loop() {
       knobMoved(k8, prevKnob8, KNOB_THRESHOLD)) {
 
     // Logic to update active notes if tuning changes
+    portENTER_CRITICAL(&timerMux);
     for (int i = 0; i < MAX_NOTES; i++) {
       if (active[i]) {
         oscillators[i].setFrequency(calculate_frequency(keys[i]));
       }
     }
+    portEXIT_CRITICAL(&timerMux);
 
     prevKnob1 = k1; prevKnob2 = k2; prevKnob3 = k3; prevKnob4 = k4;
     prevKnob5 = k5; prevKnob6 = k6; prevKnob7 = k7; prevKnob8 = k8;
@@ -257,12 +264,14 @@ void loop() {
     if (strchr(all_keys, key)) {
       add_note(key);
     } else if (key == PS2_DELETE) { // Delete key
+      portENTER_CRITICAL(&timerMux);
       for (int i = 0; i < MAX_NOTES; i++) {
         if (active[i]) {
           stop_note(i);
           active[i] = false;
         }
       }
+      portEXIT_CRITICAL(&timerMux);
     }
   }
 

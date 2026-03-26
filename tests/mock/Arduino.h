@@ -49,6 +49,11 @@ hw_timer_t * timerBegin(uint8_t num, uint16_t divider, bool countUp);
 void timerAttachInterrupt(hw_timer_t *timer, void (*fn)(void), bool edge);
 void timerAlarmWrite(hw_timer_t *timer, uint64_t interruptAt, bool autoreload);
 void timerAlarmEnable(hw_timer_t *timer);
+
+void portENTER_CRITICAL(portMUX_TYPE *mux);
+void portEXIT_CRITICAL(portMUX_TYPE *mux);
+void portENTER_CRITICAL_ISR(portMUX_TYPE *mux);
+void portEXIT_CRITICAL_ISR(portMUX_TYPE *mux);
 #ifdef __cplusplus
 }
 #endif
