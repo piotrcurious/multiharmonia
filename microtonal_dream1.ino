@@ -26,7 +26,7 @@ PS2Keyboard keyboard;
 #define BASE_NOTE 69 // The MIDI note number for A4 note
 
 // Define some variables for the musical instrument
-int notes[MAX_NOTES]; // An array to store the frequencies of the notes in a scale
+float notes[MAX_NOTES]; // An array to store the frequencies of the notes in a scale
 int baseGranularity; // The base granularity of the scale in cents (1/100 of a semitone)
 int baseKey; // The base key of the scale quantified to the selected granularity
 int consonantIntervals; // The intervals of the consonant key row in cents
@@ -60,27 +60,14 @@ void generateScale() {
     // Constrain the frequency to the minimum and maximum values
     frequency = constrain(frequency, (float)MIN_FREQ, (float)MAX_FREQ);
     // Store the frequency in the notes array
-    notes[i] = (int)frequency;
+    notes[i] = frequency;
     }
 }
 
-// A function to play a note based on a key press
-void playNote(char key) {
-   // Map the key to a note index using the ASCII code
-   // Map the key to a note index using the ASCII code
-   int noteIndex = (unsigned char)key - 32;
-   // Constrain the note index to the valid range
-   noteIndex = constrain(noteIndex, 0, MAX_NOTES - 1);
-   // Get the frequency of the note from the notes array
-   int frequency = notes[noteIndex];
+// A function to play a note
+void playNote(float frequency) {
    // Set the PWM frequency of pin 25 to the note frequency
    ledcWriteTone(0, frequency);
-}
-
-// A function to stop playing a note
-void stopNote() {
-  // Set the PWM frequency of pin 25 to zero
-  ledcWriteTone(0, 0);
 }
 
 void setup() {
@@ -94,12 +81,25 @@ void setup() {
   ledcAttachPin(25, 0);
 }
 
+// Define static members of Oscillator
+float Oscillator::sineTable[SINE_TABLE_SIZE];
+bool Oscillator::tableInitialized = false;
+
 // Variables to store previous knob values for change detection
 int prevKnob1 = -1, prevKnob2 = -1, prevKnob3 = -1, prevKnob4 = -1, prevKnob5 = -1, prevKnob8 = -1;
 #define KNOB_THRESHOLD 50
 
-// Current active key in monophonic mode
-char activeKey = '\0';
+// Monophonic voice management
+MonoVoice voice;
+float current_freq_val = 0;
+
+float calc_current_freq(char key) {
+  // Map the key to a note index using the ASCII code
+  int noteIndex = (unsigned char)key - 32;
+  // Constrain the note index to the valid range
+  noteIndex = constrain(noteIndex, 0, MAX_NOTES - 1);
+  return notes[noteIndex];
+}
 
 void loop() {
   // Check if knobs moved significantly
@@ -128,15 +128,12 @@ void loop() {
     prevKnob8 = k8;
   }
   
-  // Check if a key is available
-  if (keyboard.available()) {
-    activeKey = keyboard.read();
-    playNote(activeKey);
-  }
+  // Update voice
+  voice.update(keyboard, calc_current_freq);
 
-  // Check for release if library supports it
-  if (activeKey != '\0' && keyboard.readKeyState(activeKey) == 0) {
-    stopNote();
-    activeKey = '\0';
+  // Play tone if frequency changed
+  if (voice.oscillator.frequency != current_freq_val) {
+    current_freq_val = voice.oscillator.frequency;
+    playNote(current_freq_val);
   }
 }

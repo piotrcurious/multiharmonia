@@ -34,6 +34,10 @@ char keys[MAX_NOTES];
 // Create an array to store whether a channel is active
 bool active[MAX_NOTES];
 
+// Define static members of Oscillator
+float Oscillator::sineTable[SINE_TABLE_SIZE];
+bool Oscillator::tableInitialized = false;
+
 // Software oscillators for each voice
 Oscillator oscillators[MAX_NOTES];
 
@@ -199,8 +203,42 @@ void setup() {
 // Note tracker to handle state
 NoteTracker tracker;
 
+// Variables to store previous knob values for change detection
+int prevKnob1 = -1, prevKnob2 = -1, prevKnob3 = -1, prevKnob4 = -1, prevKnob5 = -1, prevKnob6 = -1, prevKnob7 = -1, prevKnob8 = -1;
+#define KNOB_THRESHOLD 50
+
 // Create a loop function to read and process keyboard input
 void loop() {
+  // Check if knobs moved significantly (re-read in loop)
+  int k1 = analogRead(KNOB1);
+  int k2 = analogRead(KNOB2);
+  int k3 = analogRead(KNOB3);
+  int k4 = analogRead(KNOB4);
+  int k5 = analogRead(KNOB5);
+  int k6 = analogRead(KNOB6);
+  int k7 = analogRead(KNOB7);
+  int k8 = analogRead(KNOB8);
+
+  if (knobMoved(k1, prevKnob1, KNOB_THRESHOLD) ||
+      knobMoved(k2, prevKnob2, KNOB_THRESHOLD) ||
+      knobMoved(k3, prevKnob3, KNOB_THRESHOLD) ||
+      knobMoved(k4, prevKnob4, KNOB_THRESHOLD) ||
+      knobMoved(k5, prevKnob5, KNOB_THRESHOLD) ||
+      knobMoved(k6, prevKnob6, KNOB_THRESHOLD) ||
+      knobMoved(k7, prevKnob7, KNOB_THRESHOLD) ||
+      knobMoved(k8, prevKnob8, KNOB_THRESHOLD)) {
+
+    // Logic to update active notes if tuning changes
+    for (int i = 0; i < MAX_NOTES; i++) {
+      if (active[i]) {
+        oscillators[i].setFrequency(calculate_frequency(keys[i]));
+      }
+    }
+
+    prevKnob1 = k1; prevKnob2 = k2; prevKnob3 = k3; prevKnob4 = k4;
+    prevKnob5 = k5; prevKnob6 = k6; prevKnob7 = k7; prevKnob8 = k8;
+  }
+
   // Check if there is data available from the keyboard
   if (keyboard.available()) {
     // Read and store the data from the keyboard as a char variable

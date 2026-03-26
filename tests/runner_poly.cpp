@@ -9,8 +9,8 @@ void setup();
 void loop();
 int main() {
     std::cout << "Starting Test for Polyphonic" << std::endl;
-    analogValues[A0] = 2048;
-    analogValues[A1] = 2048;
+    analogValues[34] = 2048;
+    analogValues[35] = 2048;
     setup();
     std::cout << "Pushing 'Q' then 'W' to keyboard buffer" << std::endl;
     keyboardBuffer.push('Q');

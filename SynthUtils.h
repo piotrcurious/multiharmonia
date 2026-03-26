@@ -5,6 +5,7 @@
 #include <functional>
 
 #define SAMPLE_RATE 20000.0f
+#define SINE_TABLE_SIZE 1024
 
 // Special key codes for events
 #define KEY_EVENT_PRESS   0x8000
@@ -66,26 +67,38 @@ inline bool knobMoved(int current, int previous, int threshold = 50) {
 }
 
 /**
- * @brief Simple software oscillator
+ * @brief Simple software oscillator using lookup table for performance
  */
 class Oscillator {
 public:
+  static float sineTable[SINE_TABLE_SIZE];
+  static bool tableInitialized;
+
   float frequency;
   float phase;
   float phaseIncrement;
 
-  Oscillator() : frequency(0), phase(0), phaseIncrement(0) {}
+  Oscillator() : frequency(0), phase(0), phaseIncrement(0) {
+    if (!tableInitialized) {
+      for (int i = 0; i < SINE_TABLE_SIZE; i++) {
+        sineTable[i] = sin((2.0f * PI * i) / SINE_TABLE_SIZE);
+      }
+      tableInitialized = true;
+    }
+  }
 
   void setFrequency(float freq) {
     frequency = freq;
-    phaseIncrement = (freq * 2.0f * PI) / SAMPLE_RATE;
+    phaseIncrement = (freq * SINE_TABLE_SIZE) / SAMPLE_RATE;
   }
 
   float nextSample() {
     if (frequency <= 0) return 0;
-    float sample = sin(phase);
+    // Simple linear interpolation could be added here,
+    // but for now, we'll use a direct index for speed in ISR.
+    float sample = sineTable[(int)phase];
     phase += phaseIncrement;
-    if (phase >= 2.0f * PI) phase -= 2.0f * PI;
+    while (phase >= SINE_TABLE_SIZE) phase -= SINE_TABLE_SIZE;
     return sample;
   }
 };
