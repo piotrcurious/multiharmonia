@@ -4,13 +4,14 @@
 #include "SynthUtils.h"
 
 // Define the pins for the analog knobs and the keyboard data and clock
-#define KNOB1 A0 // Base granularity of scale
-#define KNOB2 A1 // Base key of the scale quantified to selected granularity
-#define KNOB3 A2 // Intervals of the consonant key row
-#define KNOB4 A3 // Intervals of the dissonant key row
-#define KNOB5 A4 // Offset of the dissonant key row
-#define KNOB6 A5 // Offset of the additional consonant row
-#define KNOB7 A6 // Interval of additional consonant row
+#define KNOB1 34 // Base granularity of scale
+#define KNOB2 35 // Base key of the scale quantified to selected granularity
+#define KNOB3 36 // Intervals of the consonant key row
+#define KNOB4 39 // Intervals of the dissonant key row
+#define KNOB5 32 // Offset of the dissonant key row
+#define KNOB6 33 // Offset of the additional consonant row
+#define KNOB7 27 // Interval of additional consonant row
+#define KNOB8 14 // Vector Row shift
 #define DATA 16  // Keyboard data pin
 #define CLOCK 17 // Keyboard clock pin
 
@@ -40,8 +41,9 @@ char current_key = '\0'; // Current pressed key
 float current_freq = 0;  // Current frequency
 
 // Define a function to calculate the frequency of a note based on its index and offset from the base frequency and the scale interval
-float calculate_frequency(int index, float offset, float base_freq, float scale_interval) {
-  return base_freq * pow(scale_interval, index + offset);
+float calculate_frequency(int index, float offset, float base_freq, float scale_interval, float vector_shift_cents) {
+  float freq = base_freq * pow(scale_interval, index + offset);
+  return freqFromCents(freq, vector_shift_cents);
 }
 
 // Define a function to calculate the pivotal frequency of a note based on its index and the consonant and dissonant frequencies
@@ -71,6 +73,9 @@ void setup() {
   // Attach the esp32 DAC output pin (GPIO25) to channel 0
   ledcAttachPin(25, 0);
 }
+
+// Current active key in monophonic mode
+char activeKey = '\0';
 
 void loop() {
   
@@ -113,52 +118,49 @@ void loop() {
     char key = keyboard.read();
     
     // Check if the key is different from the current key
-    if (key != current_key) {
-      
-      // Stop playing the previous note
-      stop_tone();
+    if (key != activeKey) {
       
       // Update the current key
-      current_key = key;
+      activeKey = key;
       
+      // Vector shift in cents
+      float vector_shift = mapf(analogRead(KNOB8), 0, 4095, -1200, 1200);
+
+      current_freq = 0;
       // Check if the key is one of the defined keys
       for (int i = 0; i < KEYS_PER_ROW; i++) {
         if (key == CONSONANT_KEYS[i]) {
-          // Calculate the frequency of the consonant note based on its index and the base frequency and interval
-          current_freq = calculate_frequency(i, 0, knob2, knob3);
+          current_freq = calculate_frequency(i, 0, knob2, knob3, vector_shift);
           break;
         }
         else if (key == DISSONANT_KEYS[i]) {
-          // Calculate the frequency of the dissonant note based on its index, offset and the base frequency and interval
-          current_freq = calculate_frequency(i, knob5, knob2, knob4);
+          current_freq = calculate_frequency(i, knob5, knob2, knob4, vector_shift);
           break;
         }
         else if (key == ADDITIONAL_KEYS[i]) {
-          // Calculate the frequency of the additional consonant note based on its index, offset and the base frequency and interval
-          current_freq = calculate_frequency(i, knob6, knob2, knob7);
+          current_freq = calculate_frequency(i, knob6, knob2, knob7, vector_shift);
           break;
         }
         else if (key == PIVOTAL_KEYS[i]) {
-          // Calculate the frequency of the pivotal note based on its index and the consonant and dissonant frequencies
-          float consonant_freq = calculate_frequency(i, 0, knob2, knob3); // Consonant frequency for this index
-          float dissonant_freq = calculate_frequency(i, knob5, knob2, knob4); // Dissonant frequency for this index
-          current_freq = calculate_pivotal_frequency(i, consonant_freq, dissonant_freq); // Pivotal frequency for this index
+          float consonant_freq = calculate_frequency(i, 0, knob2, knob3, vector_shift);
+          float dissonant_freq = calculate_frequency(i, knob5, knob2, knob4, vector_shift);
+          current_freq = calculate_pivotal_frequency(i, consonant_freq, dissonant_freq);
           break;
         }
       }
       
-      // Play the current note with the calculated frequency
-      play_tone(current_freq);
-      
-      // Print the current key and frequency to the serial monitor for debugging
-      Serial.print("Current key: "); Serial.println(current_key);
-      Serial.print("Current freq: "); Serial.println(current_freq);
+      if (current_freq > 0) {
+        play_tone(current_freq);
+        Serial.print("Current key: "); Serial.println(activeKey);
+        Serial.print("Current freq: "); Serial.println(current_freq);
+      }
     }
-    
-    else {
-      // Do nothing if the key is the same as the current key
-    }
-    
     delay(10); // Add a small delay to avoid bouncing keys
+  }
+
+  // Check for release
+  if (activeKey != '\0' && keyboard.readKeyState(activeKey) == 0) {
+    stop_tone();
+    activeKey = '\0';
   }
 }

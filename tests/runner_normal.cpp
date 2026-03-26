@@ -14,7 +14,12 @@ int main() {
     setup();
     std::cout << "Pushing 'q' to keyboard buffer" << std::endl;
     keyboardBuffer.push('q');
+    keyStates['q'] = 1;
     loop();
+    std::cout << "Releasing 'q'" << std::endl;
+    keyStates['q'] = 0;
+    loop();
+
     std::cout << "Looping without key" << std::endl;
     loop();
     return 0;

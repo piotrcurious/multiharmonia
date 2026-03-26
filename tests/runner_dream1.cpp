@@ -18,7 +18,12 @@ int main() {
     loop();
     std::cout << "Pushing ' ' (space) to keyboard buffer" << std::endl;
     keyboardBuffer.push(' ');
+    keyStates[' '] = 1;
     loop();
+    std::cout << "Releasing ' ' (space)" << std::endl;
+    keyStates[' '] = 0;
+    loop();
+
     std::cout << "Looping without key" << std::endl;
     loop();
     return 0;

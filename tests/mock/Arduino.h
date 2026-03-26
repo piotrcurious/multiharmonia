@@ -51,6 +51,7 @@ T constrain(T x, L a, H b) {
 }
 using std::sqrt;
 using std::round;
+using std::log2;
 #include <cstring>
 using std::strchr;
 class Serial_ {

@@ -4,14 +4,14 @@
 #include "SynthUtils.h"
 
 // Define the pins for the analog knobs and the keyboard data and clock
-#define KNOB1 A0 // Base granularity of scale
-#define KNOB2 A1 // Base key of the scale quantified to selected granularity
-#define KNOB3 A2 // Intervals of the consonant key row
-#define KNOB4 A3 // Intervals of the dissonant key row
-#define KNOB5 A4 // Offset of the dissonant key row
-#define KNOB6 A5 // Offset of the additional consonant row
-#define KNOB7 A6 // Interval of additional consonant row
-#define KNOB8 33 // Vector Row shift/transpose (cents)
+#define KNOB1 34 // Base granularity of scale
+#define KNOB2 35 // Base key of the scale quantified to selected granularity
+#define KNOB3 36 // Intervals of the consonant key row
+#define KNOB4 39 // Intervals of the dissonant key row
+#define KNOB5 32 // Offset of the dissonant key row
+#define KNOB6 33 // Offset of the additional consonant row
+#define KNOB7 27 // Interval of additional consonant row
+#define KNOB8 14 // Vector Row shift/transpose (cents)
 #define DATA 16  // Keyboard data pin
 #define CLOCK 17 // Keyboard clock pin
 
@@ -60,6 +60,7 @@ float calculate_frequency(char key) {
   const char* row1 = "QWERTYUIOP[]";
   const char* row2 = "ASDFGHJKL;'";
   const char* row3 = "ZXCVBNM,./";
+  const char* rowP = "1234567890-=";
 
   int idx;
   float row_offset = 0;
@@ -74,6 +75,15 @@ float calculate_frequency(char key) {
   } else if ((idx = find_key_in_row(key, row3)) != -1) {
     key_pos = idx;
     row_offset = knob6; // Third row is additional row
+  } else if ((idx = find_key_in_row(key, rowP)) != -1) {
+    key_pos = idx;
+    // Pivotal row: geometric mean of row1 and row2 logic
+    // We'll calculate the base and dissonant frequencies and take sqrt
+    float f1 = freqFromCents(base_freq, key_pos * knob3);
+    float f2 = freqFromCents(base_freq, key_pos * knob4 + knob5);
+    float fp = sqrt(f1 * f2);
+    // Convert back to cents relative to base_freq
+    row_offset = 1200.0f * log2(fp / base_freq) - (key_pos * knob3); // Relative adjustment
   }
 
   // Read vector shift knob
@@ -149,18 +159,21 @@ void setup() {
   Serial.begin(115200);
   Serial.println("Microtonal Polyphonic Synthesizer Starting...");
 
+  // Define pins for polyphonic output (one per voice)
+  const int outputPins[MAX_NOTES] = {25, 26, 27, 14, 12, 13, 15, 2};
+
   // Initialize each ledc channel with a resolution of 8 bits and a frequency of 0 Hz
   for (int i = 0; i < MAX_NOTES; i++) {
-    ledcSetup(i, 0, 8);
-    ledcAttachPin(i + 18, i); // Attach each channel to a pin from GPIO18 to GPIO25
+    ledcSetup(i, 5000, 8);
+    ledcAttachPin(outputPins[i], i);
   }
 
   // Initialize the keyboard with the data and clock pins
   keyboard.begin(DATA, CLOCK);
 }
 
-// Global note tracker to handle key release if library doesn't
-bool released_since_last[256];
+// Note tracker to handle state
+NoteTracker tracker;
 
 // Create a loop function to read and process keyboard input
 void loop() {
@@ -169,17 +182,15 @@ void loop() {
     // Read and store the data from the keyboard as a char variable
     int raw_key = keyboard.read();
     char key = (char)(raw_key & 0xFF);
-    bool is_break = (raw_key & 0xF00) == 0xF00; // Some libraries use this to indicate break
 
-    const char* all_keys = "QWERTYUIOP[]ASDFGHJKL;'ZXCVBNM,./";
+    // We'll treat every read as a press event for standard ASCII-only PS2 libraries
+    // unless we have specific break detection logic.
+    // Since we need to know when a key is released, we'll use tracker.states
+    // updated by keyboard.readKeyState below.
 
-    // Standard PS2Keyboard library usually just gives ASCII.
-    // If it gives raw scan codes, we'd need a more complex decoder.
-    // Assuming standard library for now but providing a path for release detection if it supports it.
+    const char* all_keys = "QWERTYUIOP[]ASDFGHJKL;'ZXCVBNM,./1234567890-=";
 
-    if (is_break) {
-      remove_note(key);
-    } else if (strchr(all_keys, key)) {
+    if (strchr(all_keys, key)) {
       add_note(key);
     } else if (key == PS2_DELETE) { // Delete key
       for (int i = 0; i < MAX_NOTES; i++) {
@@ -191,12 +202,12 @@ void loop() {
     }
   }
 
-  // Fallback: Check if any of the keys are released using readKeyState if supported
+  // Update tracker states and handle releases
   for (int i = 0; i < MAX_NOTES; i++) {
     if (active[i]) {
       char key = keys[i];
-      int state = keyboard.readKeyState(key);
-      if (state == 0) {
+      // If library supports readKeyState, we use it to detect release
+      if (keyboard.readKeyState(key) == 0) {
         remove_note(key);
       }
     }

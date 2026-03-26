@@ -4,13 +4,16 @@
 #include "SynthUtils.h"
 
 // Define the pins for the keyboard and the knobs
-#define DATA_PIN 2
-#define CLOCK_PIN 3
+#define DATA_PIN 16
+#define CLOCK_PIN 17
 #define KNOB1_PIN 34
 #define KNOB2_PIN 35
 #define KNOB3_PIN 36
 #define KNOB4_PIN 39
 #define KNOB5_PIN 32
+#define KNOB6_PIN 33
+#define KNOB7_PIN 27
+#define KNOB8_PIN 14
 
 // Create an object for the keyboard
 PS2Keyboard keyboard;
@@ -42,14 +45,15 @@ void generateScale() {
   consonantIntervals = constrain(readKnobInt(KNOB3_PIN, 100, 1200), 100, 1200); // From 1 semitone to 12 semitones
   dissonantIntervals = constrain(readKnobInt(KNOB4_PIN, -1200, -100), -1200, -100); // From -12 semitones to -1 semitone
   dissonantOffset = constrain(readKnobInt(KNOB5_PIN, -600, 600), -600, 600); // From -6 semitones to +6 semitones
+  int vectorShift = readKnobInt(KNOB8_PIN, -1200, 1200);
 
   // Loop through the notes and calculate their frequencies based on the intervals and offset
   for (int i = 0; i < MAX_NOTES; i++) {
     int interval; // The interval in cents from the base key
     if (i % 2 == 0) { // If it is an even note, use the consonant intervals
-      interval = baseKey + (i / 2) * consonantIntervals;
+      interval = baseKey + (i / 2) * consonantIntervals + vectorShift;
     } else { // If it is an odd note, use the dissonant intervals and offset
-      interval = baseKey + ((i - 1) / 2) * dissonantIntervals + dissonantOffset;
+      interval = baseKey + ((i - 1) / 2) * dissonantIntervals + dissonantOffset + vectorShift;
     }
     // Calculate the frequency using the formula f = f0 * (2 ^ (n / 1200))
     float frequency = freqFromCents(BASE_FREQ, (float)interval);
@@ -90,18 +94,22 @@ void setup() {
   ledcAttachPin(25, 0);
 }
 
+// Current active key in monophonic mode
+char activeKey = '\0';
+
 void loop() {
   // Generate a scale based on the knob values
   generateScale();
   
-  // Check if a key is pressed
+  // Check if a key is available
   if (keyboard.available()) {
-    // Read the key
-    char key = keyboard.read();
-    // Play the corresponding note
-    playNote(key);
-  } else {
-    // Stop playing the note
+    activeKey = keyboard.read();
+    playNote(activeKey);
+  }
+
+  // Check for release if library supports it
+  if (activeKey != '\0' && keyboard.readKeyState(activeKey) == 0) {
     stopNote();
+    activeKey = '\0';
   }
 }

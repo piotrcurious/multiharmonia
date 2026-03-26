@@ -19,6 +19,10 @@ int main() {
     setup();
     std::cout << "Pushing '1' (Pivotal key) to keyboard buffer" << std::endl;
     keyboardBuffer.push('1');
+    keyStates['1'] = 1;
+    loop();
+    std::cout << "Releasing '1'" << std::endl;
+    keyStates['1'] = 0;
     loop();
     return 0;
 }

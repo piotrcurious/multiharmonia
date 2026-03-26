@@ -1,7 +1,6 @@
 
 // Include the libraries for PS2 keyboard and ESP32 DAC
 #include <PS2Keyboard.h>
-#include <driver/dac.h>
 #include "SynthUtils.h"
 
 // Define the pins for the keyboard and the knobs
@@ -11,6 +10,7 @@
 #define KNOB2_PIN 35
 #define KNOB3_PIN 36
 #define KNOB4_PIN 39
+#define KNOB8_PIN 14
 
 // Create an object for the keyboard
 PS2Keyboard keyboard;
@@ -43,7 +43,7 @@ int note; // The current note to play
 int noteFreq; // The frequency of the current note in Hz
 
 // Variables to store previous knob values for change detection
-int prevKnob1 = -1, prevKnob2 = -1, prevKnob3 = -1, prevKnob4 = -1;
+int prevKnob1 = -1, prevKnob2 = -1, prevKnob3 = -1, prevKnob4 = -1, prevKnob8 = -1;
 #define KNOB_THRESHOLD 50
 
 // A function to read the analog knobs and update the scale and note parameters
@@ -53,12 +53,14 @@ void readKnobs() {
   knob2Value = analogRead(KNOB2_PIN);
   knob3Value = analogRead(KNOB3_PIN);
   knob4Value = analogRead(KNOB4_PIN);
+  int knob8Value = analogRead(KNOB8_PIN);
 
   // Only regenerate scale if knobs have moved significantly
   if (!knobMoved(knob1Value, prevKnob1, KNOB_THRESHOLD) &&
       !knobMoved(knob2Value, prevKnob2, KNOB_THRESHOLD) &&
       !knobMoved(knob3Value, prevKnob3, KNOB_THRESHOLD) &&
-      !knobMoved(knob4Value, prevKnob4, KNOB_THRESHOLD)) {
+      !knobMoved(knob4Value, prevKnob4, KNOB_THRESHOLD) &&
+      !knobMoved(knob8Value, prevKnob8, KNOB_THRESHOLD)) {
     return;
   }
 
@@ -66,6 +68,7 @@ void readKnobs() {
   prevKnob2 = knob2Value;
   prevKnob3 = knob3Value;
   prevKnob4 = knob4Value;
+  prevKnob8 = knob8Value;
 
   // Map the knob values to the scale and note parameters
   baseNote = mapValue(knob1Value, 0, 4095, 0, MAX_NOTE); // Map knob 1 to the base note (0-127)
@@ -105,6 +108,9 @@ void readKnobs() {
   }
 }
 
+// Current active key in monophonic mode
+char activeKey = '\0';
+
 // A function to read the keyboard and update the note state
 void readKeyboard() {
   // Check if a key is available
@@ -114,6 +120,7 @@ void readKeyboard() {
 
     // Check if the key is valid
     if (key != PS2_KC_NONE) {
+      activeKey = key;
       // Set the key pressed flag to true
       keyPressed = true;
 
@@ -202,27 +209,26 @@ void readKeyboard() {
       }
 
       // Calculate the frequency
-      noteFreq = (int)freqFromCents(A4_FREQ, (note - A4_NOTE) * 100.0f);
+      float vectorShift = mapf(analogRead(KNOB8_PIN), 0, 4095, -1200, 1200);
+      noteFreq = (int)freqFromCents(A4_FREQ, (note - A4_NOTE) * 100.0f + vectorShift);
     }
-  } else {
-    // If no key is available, set the key pressed flag to false
+  }
+
+  // Check for release
+  if (activeKey != '\0' && keyboard.readKeyState(activeKey) == 0) {
     keyPressed = false;
+    activeKey = '\0';
   }
 }
 
-// A function to play a tone using the ESP32 DAC
+// A function to play a tone using the ESP32 LEDC
 void playTone(int freq) {
-  // Set the DAC output frequency
-  dac_frequency_set(DAC_CHANNEL_1, freq);
-
-  // Enable the DAC output
-  dac_output_enable(DAC_CHANNEL_1);
+  ledcWriteTone(0, freq);
 }
 
 // A function to stop the tone
 void stopTone() {
-  // Disable the DAC output
-  dac_output_disable(DAC_CHANNEL_1);
+  ledcWriteTone(0, 0);
 }
 
 // The setup function runs once when the board is powered on or reset
@@ -233,8 +239,9 @@ void setup() {
   // Initialize the keyboard
   keyboard.begin(DATA_PIN, CLOCK_PIN);
 
-  // Initialize the DAC
-  dac_output_enable(DAC_CHANNEL_1);
+  // Initialize the LEDC
+  ledcSetup(0, 5000, 8);
+  ledcAttachPin(25, 0);
 
   // Initialize the random seed
   randomSeed(analogRead(0));
