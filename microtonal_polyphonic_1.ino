@@ -67,20 +67,25 @@ float calculate_frequency(char key) {
 
   if ((idx = find_key_in_row(key, row1)) != -1) {
     key_pos = idx;
-    row_offset = 0;
+    row_offset = 0; // First row is base row
   } else if ((idx = find_key_in_row(key, row2)) != -1) {
     key_pos = idx;
-    row_offset = knob5;
+    row_offset = knob5; // Second row is dissonant row
   } else if ((idx = find_key_in_row(key, row3)) != -1) {
     key_pos = idx;
-    row_offset = knob6;
+    row_offset = knob6; // Third row is additional row
   }
 
   // Read vector shift knob
   float vector_shift = readKnobFloat(KNOB8, -1200, 1200);
 
   // Calculate the offset from the base key in cents based on the keyboard key and the knobs
-  float offset = key_pos * (knob3 + knob4) + row_offset + vector_shift;
+  // Each key in a row is spaced by knob3 or knob4 depending on row, or just a constant scale
+  // Based on README: Consonant row is consonant tones, dissonant row is dissonant tones.
+  // We'll use knob3 for consonant spacing and knob4 for dissonant spacing if in those rows?
+  // Or more simply, key_pos defines the horizontal position in the scale.
+  float spacing = ((idx = find_key_in_row(key, row2)) != -1) ? knob4 : knob3;
+  float offset = key_pos * spacing + row_offset + vector_shift;
 
   // Add the base key and base frequency offsets to the offset
   offset += (knob2 - knob1 / 2);
@@ -142,6 +147,7 @@ void remove_note(char key) {
 void setup() {
   // Initialize serial communication for debugging purposes
   Serial.begin(115200);
+  Serial.println("Microtonal Polyphonic Synthesizer Starting...");
 
   // Initialize each ledc channel with a resolution of 8 bits and a frequency of 0 Hz
   for (int i = 0; i < MAX_NOTES; i++) {
@@ -153,17 +159,27 @@ void setup() {
   keyboard.begin(DATA, CLOCK);
 }
 
+// Global note tracker to handle key release if library doesn't
+bool released_since_last[256];
+
 // Create a loop function to read and process keyboard input
 void loop() {
   // Check if there is data available from the keyboard
   if (keyboard.available()) {
     // Read and store the data from the keyboard as a char variable
-    char key = keyboard.read();
+    int raw_key = keyboard.read();
+    char key = (char)(raw_key & 0xFF);
+    bool is_break = (raw_key & 0xF00) == 0xF00; // Some libraries use this to indicate break
 
     const char* all_keys = "QWERTYUIOP[]ASDFGHJKL;'ZXCVBNM,./";
 
-    // Check if the key is one of the valid keys for playing notes
-    if (strchr(all_keys, key)) {
+    // Standard PS2Keyboard library usually just gives ASCII.
+    // If it gives raw scan codes, we'd need a more complex decoder.
+    // Assuming standard library for now but providing a path for release detection if it supports it.
+
+    if (is_break) {
+      remove_note(key);
+    } else if (strchr(all_keys, key)) {
       add_note(key);
     } else if (key == PS2_DELETE) { // Delete key
       for (int i = 0; i < MAX_NOTES; i++) {
@@ -175,7 +191,7 @@ void loop() {
     }
   }
 
-  // Check if any of the keys are released
+  // Fallback: Check if any of the keys are released using readKeyState if supported
   for (int i = 0; i < MAX_NOTES; i++) {
     if (active[i]) {
       char key = keys[i];

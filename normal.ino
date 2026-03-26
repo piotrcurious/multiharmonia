@@ -227,6 +227,9 @@ void stopTone() {
 
 // The setup function runs once when the board is powered on or reset
 void setup() {
+  Serial.begin(115200);
+  Serial.println("ESP32 Normal Scale Synthesizer Starting...");
+
   // Initialize the keyboard
   keyboard.begin(DATA_PIN, CLOCK_PIN);
 

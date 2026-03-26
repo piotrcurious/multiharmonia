@@ -3,6 +3,11 @@
 
 #include <Arduino.h>
 
+// Special key codes for events
+#define KEY_EVENT_PRESS   0x8000
+#define KEY_EVENT_RELEASE 0x4000
+#define KEY_CODE_MASK     0x0FFF
+
 /**
  * @file SynthUtils.h
  * @brief Shared utilities for microtonal synthesizers on ESP32.
@@ -56,6 +61,32 @@ inline int readKnobInt(int pin, int min_val, int max_val) {
 inline bool knobMoved(int current, int previous, int threshold = 50) {
   return abs(current - previous) >= threshold;
 }
+
+/**
+ * @brief A simple class to track keyboard state if the library doesn't.
+ */
+class NoteTracker {
+public:
+  bool states[256];
+  NoteTracker() {
+    for (int i = 0; i < 256; i++) states[i] = false;
+  }
+
+  void processEvent(uint16_t event) {
+    uint8_t code = event & 0xFF;
+    if (event & KEY_EVENT_PRESS) states[code] = true;
+    else if (event & KEY_EVENT_RELEASE) states[code] = false;
+  }
+
+  bool isPressed(uint8_t code) {
+    return states[code];
+  }
+
+  bool anyPressed() {
+    for (int i = 0; i < 256; i++) if (states[i]) return true;
+    return false;
+  }
+};
 
 /**
  * @brief Calculate frequency based on cent offset from a base frequency.

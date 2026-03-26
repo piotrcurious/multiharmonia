@@ -80,6 +80,9 @@ void stopNote() {
 }
 
 void setup() {
+  Serial.begin(115200);
+  Serial.println("Microtonal Dream1 Synthesizer Starting...");
+
   // Initialize the keyboard
   keyboard.begin(DATA_PIN, CLOCK_PIN);
   // Initialize the PWM channel 0 on pin 25 with 8-bit resolution
