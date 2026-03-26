@@ -1,0 +1,142 @@
+#ifndef SYNTHUTILS_H
+#define SYNTHUTILS_H
+
+#include <Arduino.h>
+#include <functional>
+
+#define SAMPLE_RATE 20000.0f
+#define SINE_TABLE_SIZE 1024
+
+// Special key codes for events
+#define KEY_EVENT_PRESS   0x8000
+#define KEY_EVENT_RELEASE 0x4000
+#define KEY_CODE_MASK     0x0FFF
+
+/**
+ * @file SynthUtils.h
+ * @brief Shared utilities for microtonal synthesizers on ESP32.
+ */
+
+/**
+ * @brief Map a float value from one range to another.
+ */
+inline float mapf(float x, float in_min, float in_max, float out_min, float out_max) {
+  if (in_max == in_min) return out_min;
+  return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
+}
+
+/**
+ * @brief Map an integer value from one range to another.
+ *
+ * Standard Arduino map() implementation for integers.
+ */
+inline int mapValue(int value, int fromLow, int fromHigh, int toLow, int toHigh) {
+  if (fromHigh == fromLow) return toLow;
+  return (value - fromLow) * (toHigh - toLow) / (fromHigh - fromLow) + toLow;
+}
+
+/**
+ * @brief Quantize a frequency (or any float) to a given granularity.
+ */
+inline float quantize(float val, float granularity) {
+  if (granularity <= 0) return val;
+  return round(val / granularity) * granularity;
+}
+
+/**
+ * @brief Read an analog pin and map it to a float range.
+ */
+inline float readKnobFloat(int pin, float min_val, float max_val) {
+  int raw = analogRead(pin);
+  return mapf((float)raw, 0, 4095, min_val, max_val);
+}
+
+/**
+ * @brief Read an analog pin and map it to an integer range.
+ */
+inline int readKnobInt(int pin, int min_val, int max_val) {
+  int raw = analogRead(pin);
+  return mapValue(raw, 0, 4095, min_val, max_val);
+}
+
+/**
+ * @brief Detect if a knob has moved beyond a certain threshold.
+ */
+inline bool knobMoved(int current, int previous, int threshold = 50) {
+  return abs(current - previous) >= threshold;
+}
+
+/**
+ * @brief Simple software oscillator using lookup table and fixed-point math (float-free ISR)
+ */
+class Oscillator {
+public:
+  static int16_t sineTable[SINE_TABLE_SIZE];
+  static bool tableInitialized;
+
+  uint32_t phase;
+  uint32_t phaseIncrement;
+  float frequency;
+
+  Oscillator() : phase(0), phaseIncrement(0), frequency(0) {
+    if (!tableInitialized) {
+      for (int i = 0; i < SINE_TABLE_SIZE; i++) {
+        sineTable[i] = (int16_t)(sin((2.0f * PI * i) / SINE_TABLE_SIZE) * 32767.0f);
+      }
+      tableInitialized = true;
+    }
+  }
+
+  void setFrequency(float freq) {
+    frequency = freq;
+    if (freq <= 0) {
+      phaseIncrement = 0;
+    } else {
+      // phaseIncrement = (freq / SAMPLE_RATE) * 2^32
+      phaseIncrement = (uint32_t)((double)freq * 4294967296.0 / (double)SAMPLE_RATE);
+    }
+  }
+
+  // Returns sample in range -32767 to 32767 (float-free)
+  int16_t nextSample() {
+    if (phaseIncrement == 0) return 0;
+    // Map 32-bit phase to SINE_TABLE_SIZE (1024 = 10 bits)
+    // Safety mask for the index
+    int16_t sample = sineTable[(phase >> 22) & (SINE_TABLE_SIZE - 1)];
+    phase += phaseIncrement;
+    return sample;
+  }
+};
+
+/**
+ * @brief Simple monophonic voice management
+ */
+class MonoVoice {
+public:
+  char activeKey;
+  Oscillator oscillator;
+
+  MonoVoice() : activeKey('\0') {}
+
+  void update(PS2Keyboard &kb, std::function<float(char)> calcFreq) {
+    if (kb.available()) {
+      activeKey = kb.read();
+      oscillator.setFrequency(calcFreq(activeKey));
+    }
+
+    if (activeKey != '\0' && kb.readKeyState(activeKey) == 0) {
+      oscillator.setFrequency(0);
+      activeKey = '\0';
+    }
+  }
+};
+
+/**
+ * @brief Calculate frequency based on cent offset from a base frequency.
+ * Formula: f = f0 * 2^(cents / 1200)
+ */
+inline float freqFromCents(float base_freq, float cents_offset) {
+  return base_freq * pow(2.0f, cents_offset / 1200.0f);
+}
+
+#endif // SYNTHUTILS_H

@@ -1,15 +1,17 @@
 // Include the libraries for esp32 and ps2 keyboard
 #include <Arduino.h>
 #include <PS2Keyboard.h>
+#include "SynthUtils.h"
 
 // Define the pins for the analog knobs and the keyboard data and clock
-#define KNOB1 A0 // Base granularity of scale
-#define KNOB2 A1 // Base key of the scale quantified to selected granularity
-#define KNOB3 A2 // Intervals of the consonant key row
-#define KNOB4 A3 // Intervals of the dissonant key row
-#define KNOB5 A4 // Offset of the dissonant key row
-#define KNOB6 A5 // Offset of the additional consonant row
-#define KNOB7 A6 // Interval of additional consonant row
+#define KNOB1 34 // Base granularity of scale
+#define KNOB2 35 // Base key of the scale quantified to selected granularity
+#define KNOB3 36 // Intervals of the consonant key row
+#define KNOB4 39 // Intervals of the dissonant key row
+#define KNOB5 32 // Offset of the dissonant key row
+#define KNOB6 33 // Offset of the additional consonant row
+#define KNOB7 27 // Interval of additional consonant row
+#define KNOB8 14 // Vector Row shift
 #define DATA 16  // Keyboard data pin
 #define CLOCK 17 // Keyboard clock pin
 
@@ -31,19 +33,10 @@ const char ADDITIONAL_KEYS[KEYS_PER_ROW] = {'Z', 'X', 'C', 'V', 'B', 'N', 'M', '
 char current_key = '\0'; // Current pressed key
 float current_freq = 0;  // Current frequency
 
-// Define a function to map a value from one range to another
-float mapf(float x, float in_min, float in_max, float out_min, float out_max) {
-  return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
-}
-
-// Define a function to quantize a frequency to a given granularity
-float quantize(float freq, float granularity) {
-  return round(freq / granularity) * granularity;
-}
-
 // Define a function to calculate the frequency of a note based on its index and offset from the base frequency and the scale interval
-float calculate_frequency(int index, float offset, float base_freq, float scale_interval) {
-  return base_freq * pow(scale_interval, index + offset);
+float calculate_frequency(int index, float offset, float base_freq, float scale_interval, float vector_shift_cents) {
+  float freq = base_freq * pow(scale_interval, index + offset);
+  return freqFromCents(freq, vector_shift_cents);
 }
 
 // Define a function to play a note with a given frequency on the esp32 DAC output pin (GPIO25)
@@ -69,87 +62,93 @@ void setup() {
   ledcAttachPin(25, 0);
 }
 
+// Define static members of Oscillator
+int16_t Oscillator::sineTable[SINE_TABLE_SIZE];
+bool Oscillator::tableInitialized = false;
+
+// Variables to store previous knob values for change detection
+int prevKnob1 = -1, prevKnob2 = -1, prevKnob3 = -1, prevKnob4 = -1, prevKnob5 = -1, prevKnob6 = -1, prevKnob7 = -1, prevKnob8 = -1;
+#define KNOB_THRESHOLD 50
+
+// Monophonic voice management
+MonoVoice voice;
+
+// Knob values
+float knob2_val, knob3_val, knob4_val, knob5_val, knob6_val, knob7_val, vector_shift_val;
+
+float calc_current_freq(char key) {
+  // Check if the key is one of the defined keys
+  for (int i = 0; i < KEYS_PER_ROW; i++) {
+    if (key == CONSONANT_KEYS[i]) {
+      return calculate_frequency(i, 0, knob2_val, knob3_val, vector_shift_val);
+    }
+    else if (key == DISSONANT_KEYS[i]) {
+      return calculate_frequency(i, knob5_val, knob2_val, knob4_val, vector_shift_val);
+    }
+    else if (key == ADDITIONAL_KEYS[i]) {
+      return calculate_frequency(i, knob6_val, knob2_val, knob7_val, vector_shift_val);
+    }
+  }
+  return 0;
+}
+
 void loop() {
-  
-  // Read the values from the analog knobs and map them to their corresponding ranges
-  
-  // Base granularity of scale: from MIN_FREQ to MAX_FREQ in Hz
-  float knob1 = mapf(analogRead(KNOB1), 0, 4095, MIN_FREQ, MAX_FREQ);
-  
-  // Base key of the scale quantified to selected granularity: from MIN_FREQ to MAX_FREQ in Hz, quantized by knob1 value
-  float knob2 = quantize(mapf(analogRead(KNOB2), 0, 4095, MIN_FREQ, MAX_FREQ), knob1);
-  
-  // Intervals of the consonant key row: from 1.01 to 2.00 (multiplicative factor)
-  float knob3 = mapf(analogRead(KNOB3), 0, 4095, 1.01, 2.00);
-  
-  // Intervals of the dissonant key row: from 1.01 to 2.00 (multiplicative factor)
-  float knob4 = mapf(analogRead(KNOB4), 0, 4095, 1.01, 2.00);
-  
-  // Offset of the dissonant key row: from -5 to 5 (additive factor)
-  float knob5 = mapf(analogRead(KNOB5), 0, 4095, -5, 5);
-  
-  // Offset of the additional consonant row: from -5 to 5 (additive factor)
-  float knob6 = mapf(analogRead(KNOB6), 0, 4095, -5, 5);
-  
-  // Interval of additional consonant row: from 1.01 to 2.00 (multiplicative factor)
-  float knob7 = mapf(analogRead(KNOB7), 0, 4095, 1.01, 2.00);
-  
-  // Print the values of the knobs to the serial monitor for debugging
-  Serial.print("Knob1: "); Serial.println(knob1);
-  Serial.print("Knob2: "); Serial.println(knob2);
-  Serial.print("Knob3: "); Serial.println(knob3);
-  Serial.print("Knob4: "); Serial.println(knob4);
-  Serial.print("Knob5: "); Serial.println(knob5);
-  Serial.print("Knob6: "); Serial.println(knob6);
-  Serial.print("Knob7: "); Serial.println(knob7);
-  
-  // Check if a key is available from the keyboard
-  if (keyboard.available()) {
-    
-    // Read the key from the keyboard
-    char key = keyboard.read();
-    
-    // Check if the key is different from the current key
-    if (key != current_key) {
-      
-      // Stop playing the previous note
-      stop_tone();
-      
-      // Update the current key
-      current_key = key;
-      
-      // Check if the key is one of the defined keys
-      for (int i = 0; i < KEYS_PER_ROW; i++) {
-        if (key == CONSONANT_KEYS[i]) {
-          // Calculate the frequency of the consonant note based on its index and the base frequency and interval
-          current_freq = calculate_frequency(i, 0, knob2, knob3);
-          break;
-        }
-        else if (key == DISSONANT_KEYS[i]) {
-          // Calculate the frequency of the dissonant note based on its index, offset and the base frequency and interval
-          current_freq = calculate_frequency(i, knob5, knob2, knob4);
-          break;
-        }
-        else if (key == ADDITIONAL_KEYS[i]) {
-          // Calculate the frequency of the additional consonant note based on its index, offset and the base frequency and interval
-          current_freq = calculate_frequency(i, knob6, knob2, knob7);
-          break;
-        }
-      }
-      
-      // Play the current note with the calculated frequency
-      play_tone(current_freq);
-      
-      // Print the current key and frequency to the serial monitor for debugging
-      Serial.print("Current key: "); Serial.println(current_key);
-      Serial.print("Current freq: "); Serial.println(current_freq);
-    }
-    
-    else {
-      // Do nothing if the key is the same as the current key
-    }
-    
-    delay(10); // Add a small delay to avoid bouncing keys
+  // Read raw knob values
+  int k1 = analogRead(KNOB1);
+  int k2 = analogRead(KNOB2);
+  int k3 = analogRead(KNOB3);
+  int k4 = analogRead(KNOB4);
+  int k5 = analogRead(KNOB5);
+  int k6 = analogRead(KNOB6);
+  int k7 = analogRead(KNOB7);
+  int k8 = analogRead(KNOB8);
+
+  // Check if knobs moved significantly
+  if (knobMoved(k1, prevKnob1, KNOB_THRESHOLD) ||
+      knobMoved(k2, prevKnob2, KNOB_THRESHOLD) ||
+      knobMoved(k3, prevKnob3, KNOB_THRESHOLD) ||
+      knobMoved(k4, prevKnob4, KNOB_THRESHOLD) ||
+      knobMoved(k5, prevKnob5, KNOB_THRESHOLD) ||
+      knobMoved(k6, prevKnob6, KNOB_THRESHOLD) ||
+      knobMoved(k7, prevKnob7, KNOB_THRESHOLD) ||
+      knobMoved(k8, prevKnob8, KNOB_THRESHOLD)) {
+
+    // Update mapped knob values
+    float knob1 = mapf((float)k1, 0, 4095, MIN_FREQ, MAX_FREQ);
+    knob2_val = quantize(mapf((float)k2, 0, 4095, MIN_FREQ, MAX_FREQ), knob1);
+    knob3_val = mapf((float)k3, 0, 4095, 1.01, 2.00);
+    knob4_val = mapf((float)k4, 0, 4095, 1.01, 2.00);
+    knob5_val = mapf((float)k5, 0, 4095, -5, 5);
+    knob6_val = mapf((float)k6, 0, 4095, -5, 5);
+    knob7_val = mapf((float)k7, 0, 4095, 1.01, 2.00);
+    vector_shift_val = mapf((float)k8, 0, 4095, -1200, 1200);
+
+    // Print values
+    Serial.print("Knob1: "); Serial.println(knob1);
+    Serial.print("Knob2: "); Serial.println(knob2_val);
+    Serial.print("Knob3: "); Serial.println(knob3_val);
+    Serial.print("Knob4: "); Serial.println(knob4_val);
+    Serial.print("Knob5: "); Serial.println(knob5_val);
+    Serial.print("Knob6: "); Serial.println(knob6_val);
+    Serial.print("Knob7: "); Serial.println(knob7_val);
+    Serial.print("Vector: "); Serial.println(vector_shift_val);
+
+    prevKnob1 = k1; prevKnob2 = k2; prevKnob3 = k3; prevKnob4 = k4;
+    prevKnob5 = k5; prevKnob6 = k6; prevKnob7 = k7; prevKnob8 = k8;
   }
   
+  // Update voice
+  voice.update(keyboard, calc_current_freq);
+
+  // Play tone if frequency changed
+  if (voice.oscillator.frequency != current_freq) {
+    current_freq = voice.oscillator.frequency;
+    play_tone(current_freq);
+    if (current_freq > 0) {
+      Serial.print("Current key: "); Serial.println(voice.activeKey);
+      Serial.print("Current freq: "); Serial.println(current_freq);
+    }
+  }
+
+  delay(10);
 }

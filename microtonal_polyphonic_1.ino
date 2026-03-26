@@ -1,17 +1,22 @@
 // Include the libraries for esp32 and ps2 keyboard
 #include <Arduino.h>
 #include <PS2Keyboard.h>
+#include "SynthUtils.h"
 
 // Define the pins for the analog knobs and the keyboard data and clock
-#define KNOB1 A0 // Base granularity of scale
-#define KNOB2 A1 // Base key of the scale quantified to selected granularity
-#define KNOB3 A2 // Intervals of the consonant key row
-#define KNOB4 A3 // Intervals of the dissonant key row
-#define KNOB5 A4 // Offset of the dissonant key row
-#define KNOB6 A5 // Offset of the additional consonant row
-#define KNOB7 A6 // Interval of additional consonant row
+#define KNOB1 34 // Base granularity of scale
+#define KNOB2 35 // Base key of the scale quantified to selected granularity
+#define KNOB3 36 // Intervals of the consonant key row
+#define KNOB4 39 // Intervals of the dissonant key row
+#define KNOB5 32 // Offset of the dissonant key row
+#define KNOB6 33 // Offset of the additional consonant row
+#define KNOB7 27 // Interval of additional consonant row
+#define KNOB8 14 // Vector Row shift/transpose (cents)
 #define DATA 16  // Keyboard data pin
 #define CLOCK 17 // Keyboard clock pin
+
+hw_timer_t * timer = NULL;
+portMUX_TYPE timerMux = portMUX_INITIALIZER_UNLOCKED;
 
 // Define the maximum number of notes that can be played simultaneously
 #define MAX_NOTES 8
@@ -24,168 +29,260 @@
 PS2Keyboard keyboard;
 
 // Create an array to store the current notes being played
-int notes[MAX_NOTES];
+float notes[MAX_NOTES];
 
 // Create an array to store the corresponding keyboard keys for each note
 char keys[MAX_NOTES];
 
-// Create a variable to store the number of notes being played
-int note_count = 0;
+// Create an array to store whether a channel is active
+volatile bool active[MAX_NOTES];
 
-// Create a function to map a value from one range to another
-float mapf(float x, float in_min, float in_max, float out_min, float out_max) {
-  return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
-}
+// Define static members of Oscillator
+int16_t Oscillator::sineTable[SINE_TABLE_SIZE];
+bool Oscillator::tableInitialized = false;
 
-// Create a function to read an analog knob value and map it to a desired range
-float read_knob(int pin, float min, float max) {
-  int raw = analogRead(pin); // Read the raw value from 0 to 4095
-  return mapf(raw, 0, 4095, min, max); // Map it to the desired range
+// Software oscillators for each voice
+Oscillator oscillators[MAX_NOTES];
+
+// Helper to find key index in a row
+int find_key_in_row(char key, const char* row) {
+  const char* p = strchr(row, key);
+  if (p) return p - row;
+  return -1;
 }
 
 // Create a function to calculate the frequency of a note based on the knob values and the keyboard key
 float calculate_frequency(char key) {
   // Read the knob values and constrain them to reasonable ranges
-  float knob1 = constrain(read_knob(KNOB1, 1, 100), 1, 100); // Base granularity of scale in cents (1/100 of a semitone)
-  float knob2 = constrain(read_knob(KNOB2, 0, knob1), 0, knob1); // Base key of the scale quantified to selected granularity in cents
-  float knob3 = constrain(read_knob(KNOB3, knob1, knob1 * 12), knob1, knob1 * 12); // Intervals of the consonant key row in cents
-  float knob4 = constrain(read_knob(KNOB4, knob1, knob1 * 12), knob1, knob1 * 12); // Intervals of the dissonant key row in cents
-  float knob5 = constrain(read_knob(KNOB5, -knob4 / 2, knob4 / 2), -knob4 / 2, knob4 / 2); // Offset of the dissonant key row in cents
-  float knob6 = constrain(read_knob(KNOB6, -knob3 / 2, knob3 / 2), -knob3 / 2, knob3 / 2); // Offset of the additional consonant row in cents
-  float knob7 = constrain(read_knob(KNOB7, knob1, knob1 * 12), knob1, knob1 * 12); // Interval of additional consonant row in cents
+  float knob1 = constrain(readKnobFloat(KNOB1, 1, 100), 1.0f, 100.0f); // Base granularity of scale in cents (1/100 of a semitone)
+  float knob2 = constrain(readKnobFloat(KNOB2, 0, knob1), 0.0f, knob1); // Base key of the scale quantified to selected granularity in cents
+  float knob3 = constrain(readKnobFloat(KNOB3, knob1, knob1 * 12), knob1, knob1 * 12); // Intervals of the consonant key row in cents
+  float knob4 = constrain(readKnobFloat(KNOB4, knob1, knob1 * 12), knob1, knob1 * 12); // Intervals of the dissonant key row in cents
+  float knob5 = constrain(readKnobFloat(KNOB5, -knob4 / 2, knob4 / 2), -knob4 / 2, knob4 / 2); // Offset of the dissonant key row in cents
+  float knob6 = constrain(readKnobFloat(KNOB6, -knob3 / 2, knob3 / 2), -knob3 / 2, knob3 / 2); // Offset of the additional consonant row in cents
+  float knob7 = constrain(readKnobFloat(KNOB7, knob1, knob1 * 12), knob1, knob1 * 12); // Interval of additional consonant row in cents
 
   // Define the base frequency as A4 (440 Hz)
   float base_freq = 440;
 
-  // Define the base key as Q on the keyboard
-  char base_key = 'Q';
+  // Define the row keys
+  const char* row1 = "QWERTYUIOP[]";
+  const char* row2 = "ASDFGHJKL;'";
+  const char* row3 = "ZXCVBNM,./";
+  const char* rowP = "1234567890-=";
+
+  int idx;
+  float row_offset = 0;
+  int key_pos = 0;
+
+  if ((idx = find_key_in_row(key, row1)) != -1) {
+    key_pos = idx;
+    row_offset = 0; // First row is base row
+  } else if ((idx = find_key_in_row(key, row2)) != -1) {
+    key_pos = idx;
+    row_offset = knob5; // Second row is dissonant row
+  } else if ((idx = find_key_in_row(key, row3)) != -1) {
+    key_pos = idx;
+    row_offset = knob6; // Third row is additional row
+  } else if ((idx = find_key_in_row(key, rowP)) != -1) {
+    key_pos = idx;
+    // Pivotal row: geometric mean of row1 and row2 logic
+    // We'll calculate the base and dissonant frequencies and take sqrt
+    float f1 = freqFromCents(base_freq, key_pos * knob3);
+    float f2 = freqFromCents(base_freq, key_pos * knob4 + knob5);
+    float fp = sqrt(f1 * f2);
+    // Convert back to cents relative to base_freq
+    row_offset = 1200.0f * log2(fp / base_freq) - (key_pos * knob3); // Relative adjustment
+  }
+
+  // Read vector shift knob
+  float vector_shift = readKnobFloat(KNOB8, -1200, 1200);
 
   // Calculate the offset from the base key in cents based on the keyboard key and the knobs
-  float offset = (key - base_key) * (knob3 + knob4) + (key >= 'A' ? knob5 : (key >= 'Z' ? knob6 : 0));
+  // Each key in a row is spaced by knob3 or knob4 depending on row, or just a constant scale
+  // Based on README: Consonant row is consonant tones, dissonant row is dissonant tones.
+  // We'll use knob3 for consonant spacing and knob4 for dissonant spacing if in those rows?
+  // Or more simply, key_pos defines the horizontal position in the scale.
+  float spacing = ((idx = find_key_in_row(key, row2)) != -1) ? knob4 : knob3;
+  float offset = key_pos * spacing + row_offset + vector_shift;
 
   // Add the base key and base frequency offsets to the offset
   offset += (knob2 - knob1 / 2);
 
-  // Calculate the frequency by multiplying the base frequency by two raised to the power of offset divided by twelve hundred
-  float freq = base_freq * pow(2, offset / 1200);
+  // Calculate the frequency
+  float freq = freqFromCents(base_freq, offset);
 
   // Return the frequency
   return freq;
 }
 
-// Create a function to play a note on a given channel with a given frequency
+// Create a function to play a note
 void play_note(int channel, float freq) {
-  // Set the frequency of the channel using the ledcWriteTone function
-  ledcWriteTone(channel, freq);
+  oscillators[channel].setFrequency(freq);
 }
 
-// Create a function to stop playing a note on a given channel
+// Create a function to stop playing a note
 void stop_note(int channel) {
-  // Set the frequency of the channel to zero using the ledcWriteTone function
-  ledcWriteTone(channel, 0);
+  oscillators[channel].setFrequency(0);
 }
 
-// Create a function to add a note to the notes array
+// Create a function to add a note
 void add_note(char key) {
-  // Check if the note is already in the array
-  for (int i = 0; i < note_count; i++) {
-    if (keys[i] == key) {
-      return; // Do nothing if the note is already in the array
+  portENTER_CRITICAL(&timerMux);
+  // Check if the note is already being played
+  for (int i = 0; i < MAX_NOTES; i++) {
+    if (active[i] && keys[i] == key) {
+      return; // Already playing
     }
   }
 
-  // Check if there is space in the array
-  if (note_count < MAX_NOTES) {
-    // Calculate the frequency of the note based on the key and the knobs
-    float freq = calculate_frequency(key);
-
-    // Add the note and the key to the array
-    notes[note_count] = freq;
-    keys[note_count] = key;
-
-    // Play the note on the corresponding channel
-    play_note(note_count, freq);
-
-    // Increment the note count
-    note_count++;
+  // Find an empty channel
+  for (int i = 0; i < MAX_NOTES; i++) {
+    if (!active[i]) {
+      float freq = calculate_frequency(key);
+      notes[i] = freq;
+      keys[i] = key;
+      active[i] = true;
+      play_note(i, freq);
+      portEXIT_CRITICAL(&timerMux);
+      return;
+    }
   }
+  portEXIT_CRITICAL(&timerMux);
 }
 
-// Create a function to remove a note from the notes array
+// Create a function to remove a note
 void remove_note(char key) {
-  // Find the index of the note in the array
-  int index = -1;
-  for (int i = 0; i < note_count; i++) {
-    if (keys[i] == key) {
-      index = i; // Store the index of the note
-      break;
+  portENTER_CRITICAL(&timerMux);
+  for (int i = 0; i < MAX_NOTES; i++) {
+    if (active[i] && keys[i] == key) {
+      stop_note(i);
+      active[i] = false;
+      keys[i] = '\0';
+      portEXIT_CRITICAL(&timerMux);
+      return;
+    }
+  }
+  portEXIT_CRITICAL(&timerMux);
+}
+
+// Timer interrupt for audio generation (Float-Free)
+void IRAM_ATTR onTimer() {
+  portENTER_CRITICAL_ISR(&timerMux);
+  int32_t mix = 0;
+  int activeVoices = 0;
+
+  for (int i = 0; i < MAX_NOTES; i++) {
+    // Rely on phaseIncrement being atomic-ish (32-bit) or just check active flag
+    if (active[i]) {
+      mix += oscillators[i].nextSample();
+      activeVoices++;
     }
   }
 
-  // Check if the note was found in the array
-  if (index != -1) {
-    // Stop playing the note on the corresponding channel
-    stop_note(index);
-
-    // Shift the notes and keys in the array to fill the gap
-    for (int i = index; i < note_count - 1; i++) {
-      notes[i] = notes[i + 1];
-      keys[i] = keys[i + 1];
-      play_note(i, notes[i]); // Update the channel frequency
-    }
-
-    // Decrement the note count
-    note_count--;
+  if (activeVoices > 1) {
+    mix /= activeVoices;
   }
+
+  // Output to DAC (GPIO 25)
+  // mix is -32767 to 32767.
+  // Map to 0..255: (mix + 32768) >> 8
+  uint8_t val = (uint8_t)((mix + 32768) >> 8);
+  dacWrite(25, val);
+  portEXIT_CRITICAL_ISR(&timerMux);
 }
 
 // Create a setup function to initialize the esp32 and the keyboard
 void setup() {
   // Initialize serial communication for debugging purposes
   Serial.begin(115200);
-
-  // Initialize each ledc channel with a resolution of 8 bits and a frequency of 0 Hz
-  for (int i = 0; i < MAX_NOTES; i++) {
-    ledcSetup(i, 0, 8);
-    ledcAttachPin(i + 18, i); // Attach each channel to a pin from GPIO18 to GPIO25
-  }
+  Serial.println("Microtonal Polyphonic Synthesizer Starting (Software Mixed)...");
 
   // Initialize the keyboard with the data and clock pins
   keyboard.begin(DATA, CLOCK);
+
+  // Set up Timer for audio (SAMPLE_RATE)
+  // Timer 0, divider 80 (1us per tick if 80MHz)
+  timer = timerBegin(0, 80, true);
+  timerAttachInterrupt(timer, &onTimer, true);
+  // Alarm every (1,000,000 / SAMPLE_RATE) us
+  timerAlarmWrite(timer, 1000000 / (int)SAMPLE_RATE, true);
+  timerAlarmEnable(timer);
 }
+
+// Variables to store previous knob values for change detection
+int prevKnob1 = -1, prevKnob2 = -1, prevKnob3 = -1, prevKnob4 = -1, prevKnob5 = -1, prevKnob6 = -1, prevKnob7 = -1, prevKnob8 = -1;
+#define KNOB_THRESHOLD 50
 
 // Create a loop function to read and process keyboard input
 void loop() {
+  // Check if knobs moved significantly (re-read in loop)
+  int k1 = analogRead(KNOB1);
+  int k2 = analogRead(KNOB2);
+  int k3 = analogRead(KNOB3);
+  int k4 = analogRead(KNOB4);
+  int k5 = analogRead(KNOB5);
+  int k6 = analogRead(KNOB6);
+  int k7 = analogRead(KNOB7);
+  int k8 = analogRead(KNOB8);
+
+  if (knobMoved(k1, prevKnob1, KNOB_THRESHOLD) ||
+      knobMoved(k2, prevKnob2, KNOB_THRESHOLD) ||
+      knobMoved(k3, prevKnob3, KNOB_THRESHOLD) ||
+      knobMoved(k4, prevKnob4, KNOB_THRESHOLD) ||
+      knobMoved(k5, prevKnob5, KNOB_THRESHOLD) ||
+      knobMoved(k6, prevKnob6, KNOB_THRESHOLD) ||
+      knobMoved(k7, prevKnob7, KNOB_THRESHOLD) ||
+      knobMoved(k8, prevKnob8, KNOB_THRESHOLD)) {
+
+    // Logic to update active notes if tuning changes
+    portENTER_CRITICAL(&timerMux);
+    for (int i = 0; i < MAX_NOTES; i++) {
+      if (active[i]) {
+        oscillators[i].setFrequency(calculate_frequency(keys[i]));
+      }
+    }
+    portEXIT_CRITICAL(&timerMux);
+
+    prevKnob1 = k1; prevKnob2 = k2; prevKnob3 = k3; prevKnob4 = k4;
+    prevKnob5 = k5; prevKnob6 = k6; prevKnob7 = k7; prevKnob8 = k8;
+  }
+
   // Check if there is data available from the keyboard
   if (keyboard.available()) {
     // Read and store the data from the keyboard as a char variable
-    char key = keyboard.read();
+    int raw_key = keyboard.read();
+    char key = (char)(raw_key & 0xFF);
 
-    // Check if the key is one of the valid keys for playing notes
-    if (key >= 'Q' && key <= 'P') { // Consonant key row
-      add_note(key); // Add the note to the array and play it
-    } else if (key >= 'A' && key <= 'L') { // Dissonant key row
-      add_note(key); // Add the note to the array and play it
-    } else if (key >= 'Z' && key <= 'M') { // Additional consonant row
-      add_note(key); // Add the note to the array and play it
+    // We'll treat every read as a press event for standard ASCII-only PS2 libraries
+    // unless we have specific break detection logic.
+    // Since we need to know when a key is released, we'll use tracker.states
+    // updated by keyboard.readKeyState below.
+
+    const char* all_keys = "QWERTYUIOP[]ASDFGHJKL;'ZXCVBNM,./1234567890-=";
+
+    if (strchr(all_keys, key)) {
+      add_note(key);
     } else if (key == PS2_DELETE) { // Delete key
-      for (int i = 0; i < note_count; i++) {
-        stop_note(i); // Stop playing all notes on all channels
+      portENTER_CRITICAL(&timerMux);
+      for (int i = 0; i < MAX_NOTES; i++) {
+        if (active[i]) {
+          stop_note(i);
+          active[i] = false;
+        }
       }
-      note_count = 0; // Reset the note count and clear the array
+      portEXIT_CRITICAL(&timerMux);
     }
   }
 
-  // Check if any of the keys are released by reading them again
-  for (int i = 0; i < note_count; i++) {
-    char key = keys[i]; // Get the key from the array
-
-    // Read and store the state of the key using the keyboard.readKeyState function
-    int state = keyboard.readKeyState(key);
-
-    // Check if the state is zero, meaning that the key is released
-    if (state == 0) {
-      remove_note(key); // Remove the note from the array and stop playing it
+  // Update tracker states and handle releases
+  for (int i = 0; i < MAX_NOTES; i++) {
+    if (active[i]) {
+      char key = keys[i];
+      // If library supports readKeyState, we use it to detect release
+      if (keyboard.readKeyState(key) == 0) {
+        remove_note(key);
+      }
     }
   }
 }

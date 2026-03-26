@@ -1,15 +1,19 @@
 // Include the libraries for esp32 and ps2 keyboard
 #include <Arduino.h>
 #include <PS2Keyboard.h>
+#include "SynthUtils.h"
 
 // Define the pins for the keyboard and the knobs
-#define DATA_PIN 2
-#define CLOCK_PIN 3
+#define DATA_PIN 16
+#define CLOCK_PIN 17
 #define KNOB1_PIN 34
 #define KNOB2_PIN 35
 #define KNOB3_PIN 36
 #define KNOB4_PIN 39
 #define KNOB5_PIN 32
+#define KNOB6_PIN 33
+#define KNOB7_PIN 27
+#define KNOB8_PIN 14
 
 // Create an object for the keyboard
 PS2Keyboard keyboard;
@@ -22,72 +26,54 @@ PS2Keyboard keyboard;
 #define BASE_NOTE 69 // The MIDI note number for A4 note
 
 // Define some variables for the musical instrument
-int notes[MAX_NOTES]; // An array to store the frequencies of the notes in a scale
+float notes[MAX_NOTES]; // An array to store the frequencies of the notes in a scale
 int baseGranularity; // The base granularity of the scale in cents (1/100 of a semitone)
 int baseKey; // The base key of the scale quantified to the selected granularity
 int consonantIntervals; // The intervals of the consonant key row in cents
 int dissonantIntervals; // The intervals of the dissonant key row in cents
 int dissonantOffset; // The offset of the dissonant key row in cents
 
-// A function to map a value from one range to another
-int mapValue(int value, int fromLow, int fromHigh, int toLow, int toHigh) {
-  return (value - fromLow) * (toHigh - toLow) / (fromHigh - fromLow) + toLow;
-}
-
-// A function to read the value of a knob and map it to a range
-int readKnob(int pin, int min, int max) {
-  int value = analogRead(pin); // Read the analog value from 0 to 4095
-  return mapValue(value, 0, 4095, min, max); // Map it to the desired range
-}
-
 // A function to generate a scale based on the knob values
 void generateScale() {
   // Read the knob values and constrain them to reasonable ranges
-  baseGranularity = constrain(readKnob(KNOB1_PIN, 1, 100), 1, 100); // From 1 cent to 100 cents
-  baseKey = constrain(readKnob(KNOB2_PIN, -1200, 1200), -1200, 1200); // From -12 semitones to +12 semitones
-  consonantIntervals = constrain(readKnob(KNOB3_PIN, 100, 1200), 100, 1200); // From 1 semitone to 12 semitones
-  dissonantIntervals = constrain(readKnob(KNOB4_PIN, -1200, -100), -1200, -100); // From -12 semitones to -1 semitone
-  dissonantOffset = constrain(readKnob(KNOB5_PIN, -600, 600), -600, 600); // From -6 semitones to +6 semitones
+  baseGranularity = constrain(readKnobInt(KNOB1_PIN, 1, 100), 1, 100); // From 1 cent to 100 cents
+  baseKey = constrain(readKnobInt(KNOB2_PIN, -1200, 1200), -1200, 1200); // From -12 semitones to +12 semitones
 
-  // Calculate the number of notes in the scale based on the base granularity
-  int numNotes = MAX_NOTES / baseGranularity;
+  // Quantize baseKey by baseGranularity
+  baseKey = (baseKey / baseGranularity) * baseGranularity;
+
+  consonantIntervals = constrain(readKnobInt(KNOB3_PIN, 100, 1200), 100, 1200); // From 1 semitone to 12 semitones
+  dissonantIntervals = constrain(readKnobInt(KNOB4_PIN, -1200, -100), -1200, -100); // From -12 semitones to -1 semitone
+  dissonantOffset = constrain(readKnobInt(KNOB5_PIN, -600, 600), -600, 600); // From -6 semitones to +6 semitones
+  int vectorShift = readKnobInt(KNOB8_PIN, -1200, 1200);
 
   // Loop through the notes and calculate their frequencies based on the intervals and offset
-  for (int i = 0; i < numNotes; i++) {
+  for (int i = 0; i < MAX_NOTES; i++) {
     int interval; // The interval in cents from the base key
     if (i % 2 == 0) { // If it is an even note, use the consonant intervals
-      interval = baseKey + (i / 2) * consonantIntervals;
+      interval = baseKey + (i / 2) * consonantIntervals + vectorShift;
     } else { // If it is an odd note, use the dissonant intervals and offset
-      interval = baseKey + ((i - 1) / 2) * dissonantIntervals + dissonantOffset;
+      interval = baseKey + ((i - 1) / 2) * dissonantIntervals + dissonantOffset + vectorShift;
     }
     // Calculate the frequency using the formula f = f0 * (2 ^ (n / 1200))
-    int frequency = BASE_FREQ * pow(2.0, interval / 1200.0);
+    float frequency = freqFromCents(BASE_FREQ, (float)interval);
     // Constrain the frequency to the minimum and maximum values
-    frequency = constrain(frequency, MIN_FREQ, MAX_FREQ);
+    frequency = constrain(frequency, (float)MIN_FREQ, (float)MAX_FREQ);
     // Store the frequency in the notes array
     notes[i] = frequency;
     }
 }
 
-// A function to play a note based on a key press
-void playNote(char key) {
-   // Map the key to a note index using the ASCII code
-   int noteIndex = key - 32; // Subtract 32 to start from the space key
-   // Constrain the note index to the valid range
-   noteIndex = constrain(noteIndex, 0, MAX_NOTES - 1);
-   // Get the frequency of the note from the notes array
-   int frequency = notes[noteIndex];
+// A function to play a note
+void playNote(float frequency) {
    // Set the PWM frequency of pin 25 to the note frequency
    ledcWriteTone(0, frequency);
 }
 
-// A function to stop playing a note
-void stopNote() {
-  // Set the PWM frequency of pin 25 to zero
-  ledcWriteTone(0, 0);
-}
-
 void setup() {
+  Serial.begin(115200);
+  Serial.println("Microtonal Dream1 Synthesizer Starting...");
+
   // Initialize the keyboard
   keyboard.begin(DATA_PIN, CLOCK_PIN);
   // Initialize the PWM channel 0 on pin 25 with 8-bit resolution
@@ -95,18 +81,59 @@ void setup() {
   ledcAttachPin(25, 0);
 }
 
+// Define static members of Oscillator
+int16_t Oscillator::sineTable[SINE_TABLE_SIZE];
+bool Oscillator::tableInitialized = false;
+
+// Variables to store previous knob values for change detection
+int prevKnob1 = -1, prevKnob2 = -1, prevKnob3 = -1, prevKnob4 = -1, prevKnob5 = -1, prevKnob8 = -1;
+#define KNOB_THRESHOLD 50
+
+// Monophonic voice management
+MonoVoice voice;
+float current_freq_val = 0;
+
+float calc_current_freq(char key) {
+  // Map the key to a note index using the ASCII code
+  int noteIndex = (unsigned char)key - 32;
+  // Constrain the note index to the valid range
+  noteIndex = constrain(noteIndex, 0, MAX_NOTES - 1);
+  return notes[noteIndex];
+}
+
 void loop() {
-  // Generate a scale based on the knob values
-  generateScale();
+  // Check if knobs moved significantly
+  int k1 = analogRead(KNOB1_PIN);
+  int k2 = analogRead(KNOB2_PIN);
+  int k3 = analogRead(KNOB3_PIN);
+  int k4 = analogRead(KNOB4_PIN);
+  int k5 = analogRead(KNOB5_PIN);
+  int k8 = analogRead(KNOB8_PIN);
+
+  if (knobMoved(k1, prevKnob1, KNOB_THRESHOLD) ||
+      knobMoved(k2, prevKnob2, KNOB_THRESHOLD) ||
+      knobMoved(k3, prevKnob3, KNOB_THRESHOLD) ||
+      knobMoved(k4, prevKnob4, KNOB_THRESHOLD) ||
+      knobMoved(k5, prevKnob5, KNOB_THRESHOLD) ||
+      knobMoved(k8, prevKnob8, KNOB_THRESHOLD)) {
+
+    // Generate a scale based on the knob values
+    generateScale();
+
+    prevKnob1 = k1;
+    prevKnob2 = k2;
+    prevKnob3 = k3;
+    prevKnob4 = k4;
+    prevKnob5 = k5;
+    prevKnob8 = k8;
+  }
   
-  // Check if a key is pressed
-  if (keyboard.available()) {
-    // Read the key
-    char key = keyboard.read();
-    // Play the corresponding note
-    playNote(key);
-  } else {
-    // Stop playing the note
-    stopNote();
+  // Update voice
+  voice.update(keyboard, calc_current_freq);
+
+  // Play tone if frequency changed
+  if (voice.oscillator.frequency != current_freq_val) {
+    current_freq_val = voice.oscillator.frequency;
+    playNote(current_freq_val);
   }
 }
